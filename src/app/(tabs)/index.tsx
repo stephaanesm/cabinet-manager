@@ -1,16 +1,31 @@
-import {
-  View, Text, ScrollView, TouchableOpacity, StyleSheet, StatusBar,
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
-import {
-  Bell, WifiOff, Brain, Calendar, FileText, TrendingUp,
-  DollarSign, Users, AlertTriangle, ArrowUp, ArrowDown, Plus,
-} from 'lucide-react-native';
 import { AppColors as C } from '@/constants/theme';
 import {
-  affaires, audiences, factures, notifications,
+    affaires, audiences, factures, notifications,
 } from '@/data/mockData';
+import { useRouter } from 'expo-router';
+import {
+    AlertTriangle,
+    ArrowDown,
+    ArrowUp,
+    Bell,
+    Brain, Calendar,
+    DollarSign,
+    FileText,
+    Plus,
+    Shield,
+    TrendingUp,
+    Users,
+    WifiOff
+} from 'lucide-react-native';
+import {
+    ScrollView,
+    StatusBar,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function DashboardScreen() {
   const router = useRouter();
@@ -263,6 +278,10 @@ export default function DashboardScreen() {
         <TouchableOpacity style={s.fab} onPress={() => router.push('/(tabs)/affaires')} activeOpacity={0.85}>
           <Plus color={C.gray900} size={28} />
         </TouchableOpacity>
+        {/* Bouton Admin */}
+        <TouchableOpacity style={s.adminFab} onPress={() => router.push('/admin' as any)} activeOpacity={0.85}>
+          <Shield color={C.white} size={20} />
+        </TouchableOpacity>
       </SafeAreaView>
     </View>
   );
@@ -383,5 +402,12 @@ const s = StyleSheet.create({
     backgroundColor: C.amber500, borderRadius: 28,
     alignItems: 'center', justifyContent: 'center',
     shadowColor: C.amber600, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.4, shadowRadius: 8, elevation: 8,
+  },
+  adminFab: {
+    position: 'absolute', bottom: 80, left: 20,
+    width: 48, height: 48,
+    backgroundColor: C.red600, borderRadius: 24,
+    alignItems: 'center', justifyContent: 'center',
+    shadowColor: C.red700, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.4, shadowRadius: 8, elevation: 8,
   },
 });

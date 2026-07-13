@@ -1,12 +1,15 @@
+import { AppColors as C } from '@/constants/theme';
+import { useRouter } from 'expo-router';
+import { ArrowLeft, ChevronRight, Eye, EyeOff, Lock, Settings, Shield } from 'lucide-react-native';
 import { useState } from 'react';
 import {
-  View, Text, TextInput, TouchableOpacity, StyleSheet,
-  ScrollView, ActivityIndicator, KeyboardAvoidingView, Platform,
+    ActivityIndicator, KeyboardAvoidingView, Platform,
+    ScrollView,
+    StyleSheet,
+    Text, TextInput, TouchableOpacity,
+    View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
-import { Lock, Eye, EyeOff, Shield, ChevronRight, ArrowLeft, WifiOff } from 'lucide-react-native';
-import { AppColors as C } from '@/constants/theme';
 
 type Step = 'credentials' | '2fa';
 
@@ -183,6 +186,15 @@ export default function LoginScreen() {
             <View style={s.footer}>
               <Text style={s.footerText}>Cabinet d'Avocats • Cameroun</Text>
               <Text style={s.footerVersion}>Version 1.0.0 • Données chiffrées TLS</Text>
+              {/* Accès Administrateur */}
+              <TouchableOpacity
+                style={s.adminLink}
+                onPress={() => router.replace('/admin' as any)}
+                activeOpacity={0.7}
+              >
+                <Settings color={C.red500} size={14} />
+                <Text style={s.adminLinkText}>Accès Administrateur</Text>
+              </TouchableOpacity>
             </View>
           </ScrollView>
         </KeyboardAvoidingView>
@@ -280,4 +292,6 @@ const s = StyleSheet.create({
   footer: { alignItems: 'center', marginTop: 32 },
   footerText: { fontSize: 13, color: C.gray400 },
   footerVersion: { fontSize: 11, color: C.gray600, marginTop: 4 },
+  adminLink: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 16, paddingVertical: 6 },
+  adminLinkText: { fontSize: 12, color: C.red500, fontWeight: '500' },
 });

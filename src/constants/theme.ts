@@ -53,15 +53,19 @@ export const AppColors = {
   // Status colors
   green50:  '#f0fdf4',
   green100: '#dcfce7',
+  green200: '#bbf7d0',
   green500: '#22c55e',
   green600: '#16a34a',
   green700: '#15803d',
 
   red50:   '#fef2f2',
   red100:  '#fee2e2',
-  red500:  '#ef4444',
+  red200:  '#fecaca',
+  red400: '#f87171',
+  red500: '#ef4444',
   red600:  '#dc2626',
   red700:  '#b91c1c',
+  red800:  '#991b1b',
 
   orange50:  '#fff7ed',
   orange100: '#ffedd5',
