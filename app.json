@@ -12,7 +12,8 @@
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/android-icon-foreground.png",
         "backgroundColor": "#111827"
-      }
+      },
+      "package": "com.momosm.cabinet_manager"
     },
     "web": {
       "bundler": "metro",
@@ -33,6 +34,12 @@
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "7927fe3a-6021-401d-9133-81d304b1e24c"
+      }
     }
   }
 }
