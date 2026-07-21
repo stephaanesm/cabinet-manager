@@ -1,0 +1,128 @@
+# ==============================================================================
+# CABINET MANAGER — dynamic_conf.yml (configuration dynamique)
+# 2.4 API Gateway & sécurité réseau — middlewares de sécurité applicative
+# ==============================================================================
+
+http:
+  middlewares:
+
+    # ---- En-têtes de sécurité HTTP, appliqués à tout le trafic ----
+    security-headers:
+      headers:
+        stsSeconds: 31536000
+        stsIncludeSubdomains: true
+        stsPreload: true
+        forceSTSHeader: true
+        contentTypeNosniff: true
+        browserXssFilter: true
+        frameDeny: true
+        referrerPolicy: "strict-origin-when-cross-origin"
+        permissionsPolicy: "geolocation=(), camera=(), microphone=()"
+        customResponseHeaders:
+          Server: ""              # masque la bannière serveur (durcissement)
+          X-Powered-By: ""
+
+    # ---- Limitation de débit générale sur l'API (protection contre l'abus / DoS applicatif) ----
+    api-rate-limit:
+      rateLimit:
+        average: 20                # 20 requêtes/seconde en moyenne par IP
+        burst: 50
+        period: 1s
+        sourceCriterion:
+          ipStrategy:
+            depth: 1
+
+    # ---- Limitation renforcée sur les routes d'authentification (anti-bruteforce) ----
+    auth-rate-limit:
+      rateLimit:
+        average: 5
+        burst: 10
+        period: 1m
+        sourceCriterion:
+          ipStrategy:
+            depth: 1
+
+    # ---- Authentification basique pour les interfaces d'administration
+    #      (dashboard Traefik, console MinIO) — en complément de l'IP allowlist ----
+    admin-auth:
+      basicAuth:
+        usersFile: /etc/traefik/admin_htpasswd
+        realm: "Cabinet Manager — Zone d'administration"
+
+    # ---- Restriction par plage d'IP pour les interfaces d'administration
+    #      (VPN/bureau du prestataire ; à adapter à l'infrastructure réelle) ----
+    admin-ipwhitelist:
+      ipAllowList:
+        sourceRange:
+          - "10.0.0.0/8"
+          - "127.0.0.1/32"
+
+    # ---- Taille maximale du corps de requête (protection contre les uploads abusifs
+    #      hors du flux GED dédié, qui a ses propres limites applicatives) ----
+    request-body-limit:
+      buffering:
+        maxRequestBodyBytes: 5242880    # 5 Mo pour les requêtes JSON classiques
+
+    # ---- Compression des réponses ----
+    compress:
+      compress: {}
+
+    # ---- Retry automatique en cas d'erreur transitoire vers le backend ----
+    retry-backend:
+      retry:
+        attempts: 2
+        initialInterval: 100ms
+
+  routers:
+    # Route principale de l'API applicative (le service "backend-api" est
+    # déclaré et labellisé dans le docker-compose du dépôt applicatif)
+    api-router:
+      rule: "Host(`api.${DOMAIN}`)"
+      entryPoints:
+        - websecure
+      tls:
+        certResolver: letsencrypt
+      middlewares:
+        - security-headers
+        - api-rate-limit
+        - request-body-limit
+        - compress
+        - retry-backend
+      service: backend-api-svc
+
+    api-auth-router:
+      rule: "Host(`api.${DOMAIN}`) && PathPrefix(`/api/v1/auth`)"
+      entryPoints:
+        - websecure
+      tls:
+        certResolver: letsencrypt
+      priority: 100          # priorité plus haute : capte les routes /auth avant le router générique
+      middlewares:
+        - security-headers
+        - auth-rate-limit
+        - compress
+      service: backend-api-svc
+
+  services:
+    backend-api-svc:
+      loadBalancer:
+        servers:
+          - url: "http://backend-api:8080"
+        healthCheck:
+          path: /health
+          interval: 10s
+          timeout: 3s
+
+tls:
+  options:
+    default:
+      minVersion: VersionTLS12
+      cipherSuites:
+        - TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
+        - TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
+        - TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
+        - TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384
+      curvePreferences:
+        - CurveP521
+        - CurveP384
+      sniStrict: true

@@ -1,0 +1,10 @@
+# Backend NestJS — fichiers à ignorer par Git
+node_modules/
+dist/
+coverage/
+.env
+*.tsbuildinfo
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+.DS_Store

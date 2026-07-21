@@ -1,0 +1,43 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AppUserFullAccessToDocumentsBucket",
+      "Effect": "Allow",
+      "Principal": { "AWS": ["arn:aws:iam:::user/cm_app_user"] },
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:DeleteObject",
+        "s3:ListBucket"
+      ],
+      "Resource": [
+        "arn:aws:s3:::cabinet-manager-documents",
+        "arn:aws:s3:::cabinet-manager-documents/*"
+      ]
+    },
+    {
+      "Sid": "DenyInsecureTransport",
+      "Effect": "Deny",
+      "Principal": "*",
+      "Action": "s3:*",
+      "Resource": [
+        "arn:aws:s3:::cabinet-manager-documents",
+        "arn:aws:s3:::cabinet-manager-documents/*"
+      ],
+      "Condition": {
+        "Bool": { "aws:SecureTransport": "false" }
+      }
+    },
+    {
+      "Sid": "DenyPublicAccess",
+      "Effect": "Deny",
+      "Principal": "*",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::cabinet-manager-documents/*",
+      "Condition": {
+        "StringNotEquals": { "aws:PrincipalType": "User" }
+      }
+    }
+  ]
+}

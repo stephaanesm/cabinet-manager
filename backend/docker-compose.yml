@@ -1,0 +1,72 @@
+version: "3.9"
+
+# ==============================================================================
+# CABINET MANAGER — docker-compose.yml (backend applicatif)
+# À lancer APRÈS l'infrastructure (infrastructure/docker-compose.yml).
+#
+# Prérequis :
+#   docker network create web          (réseau public, une seule fois)
+#   cd infrastructure && docker compose up -d   (Traefik + PostgreSQL + MinIO)
+#   cd ../backend && cp .env.example .env       (puis renseigner les secrets)
+#   docker compose up -d
+# ==============================================================================
+
+networks:
+  web:
+    external: true   # Réseau public — Traefik y est rattaché
+  backend:
+    external: true   # Réseau interne partagé avec l'infrastructure (Postgres, MinIO)
+
+services:
+  backend-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runner
+    container_name: cm_backend_api
+    restart: unless-stopped
+    networks:
+      - web
+      - backend
+    env_file:
+      - .env
+    environment:
+      # Surcharge les variables d'env pour pointer vers les services Docker
+      DB_HOST: postgres-primary
+      DB_PORT: "5432"
+      MINIO_ENDPOINT: minio
+      MINIO_PORT: "9000"
+      MINIO_USE_SSL: "false"
+    depends_on:
+      - postgres-primary-check
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/api/v1/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=web"
+      # Le routeur api-router dans infrastructure/traefik/dynamic_conf.yml
+      # pointe déjà vers backend-api-svc → http://backend-api:8080
+      # Aucune configuration supplémentaire Traefik requise ici.
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  # Service factice pour vérifier que postgres-primary est disponible
+  # avant de démarrer l'API (sans dépendre directement du service d'infra)
+  postgres-primary-check:
+    image: postgres:16.4
+    container_name: cm_postgres_check
+    networks:
+      - backend
+    command: >
+      sh -c "until pg_isready -h postgres-primary -U $${DB_USER} -d $${DB_NAME}; do
+               echo '[check] Attente de postgres-primary...'; sleep 2;
+             done; echo '[check] PostgreSQL prêt.'"
+    env_file:
+      - .env
+    restart: "no"

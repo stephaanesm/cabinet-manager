@@ -1,0 +1,14 @@
+# Docker ignore — backend NestJS
+node_modules/
+dist/
+coverage/
+.env
+*.tsbuildinfo
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+.git/
+.gitignore
+README.md
+docker-compose.yml
+.dockerignore

@@ -1,0 +1,199 @@
+version: "3.9"
+
+# ==============================================================================
+# CABINET MANAGER — INFRASTRUCTURE (Phase 2)
+# 2.2 Base de données | 2.3 Stockage documentaire | 2.4 API Gateway & sécurité réseau
+# ==============================================================================
+# Utilisation :
+#   cp .env.example .env   puis renseigner les secrets
+#   docker network create web        (réseau public, une seule fois)
+#   docker compose up -d
+# ==============================================================================
+
+networks:
+  web:
+    external: true          # réseau exposé, uniquement Traefik y est branché
+  backend:
+    internal: true          # réseau interne : API <-> Postgres/MinIO, aucun accès direct depuis Internet
+
+volumes:
+  postgres_primary_data:
+  postgres_replica_data:
+  minio_data:
+  traefik_acme:
+  traefik_logs:
+
+services:
+
+  # ============================================================
+  # 2.4 API GATEWAY & SÉCURITÉ RÉSEAU
+  # ============================================================
+  traefik:
+    image: traefik:v3.1
+    container_name: cm_traefik
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - web
+      - backend
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./traefik/dynamic_conf.yml:/etc/traefik/dynamic_conf.yml:ro
+      - traefik_acme:/acme
+      - traefik_logs:/var/log/traefik
+    environment:
+      - ACME_EMAIL=${ACME_EMAIL}
+    labels:
+      - "traefik.enable=true"
+      # Redirection HTTP -> HTTPS globale
+      - "traefik.http.routers.http-catchall.rule=hostregexp(`{host:.+}`)"
+      - "traefik.http.routers.http-catchall.entrypoints=web"
+      - "traefik.http.routers.http-catchall.middlewares=redirect-to-https"
+      - "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https"
+      # Dashboard Traefik protégé (Basic Auth + restreint au réseau interne d'administration)
+      - "traefik.http.routers.dashboard.rule=Host(`traefik.${DOMAIN}`)"
+      - "traefik.http.routers.dashboard.service=api@internal"
+      - "traefik.http.routers.dashboard.entrypoints=websecure"
+      - "traefik.http.routers.dashboard.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.dashboard.middlewares=admin-auth,admin-ipwhitelist"
+
+  # ============================================================
+  # 2.2 BASE DE DONNÉES — PostgreSQL primaire + réplique en lecture
+  # ============================================================
+  postgres-primary:
+    image: postgres:16.4
+    container_name: cm_postgres_primary
+    restart: unless-stopped
+    networks:
+      - backend
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_REPLICATION_USER: ${POSTGRES_REPLICATION_USER}
+      POSTGRES_REPLICATION_PASSWORD: ${POSTGRES_REPLICATION_PASSWORD}
+      CM_APP_USER_PASSWORD: ${CM_APP_USER_PASSWORD}
+    volumes:
+      - postgres_primary_data:/var/lib/postgresql/data
+      - ./postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+      - ./postgres/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
+      - ./postgres/init-replication.sh:/docker-entrypoint-initdb.d/init-replication.sh:ro
+    command: >
+      postgres
+        -c config_file=/etc/postgresql/postgresql.conf
+        -c hba_file=/etc/postgresql/pg_hba.conf
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+
+  postgres-replica:
+    image: postgres:16.4
+    container_name: cm_postgres_replica
+    restart: unless-stopped
+    networks:
+      - backend
+    depends_on:
+      postgres-primary:
+        condition: service_healthy
+    environment:
+      PGUSER: ${POSTGRES_REPLICATION_USER}
+      PGPASSWORD: ${POSTGRES_REPLICATION_PASSWORD}
+      PRIMARY_HOST: postgres-primary
+    volumes:
+      - postgres_replica_data:/var/lib/postgresql/data
+      - ./postgres/init-replica.sh:/docker-entrypoint-initdb.d/init-replica.sh:ro
+    entrypoint: ["/docker-entrypoint-initdb.d/init-replica.sh"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  postgres-backup:
+    image: postgres:16.4
+    container_name: cm_postgres_backup
+    restart: unless-stopped
+    networks:
+      - backend
+    depends_on:
+      - postgres-primary
+    environment:
+      PGHOST: postgres-primary
+      PGUSER: ${POSTGRES_USER}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: ${POSTGRES_DB}
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      BACKUP_BUCKET: db-backups
+      RETENTION_DAYS: "30"
+    volumes:
+      - ./scripts/backup_postgres.sh:/scripts/backup_postgres.sh:ro
+      - ./scripts/restore_postgres.sh:/scripts/restore_postgres.sh:ro
+    entrypoint: ["/bin/sh", "-c", "chmod +x /scripts/*.sh && crond -f -l 2 & echo '0 2 * * * /scripts/backup_postgres.sh >> /var/log/backup.log 2>&1' > /etc/crontabs/root && crond -f"]
+
+  # ============================================================
+  # 2.3 STOCKAGE DOCUMENTAIRE — MinIO (S3-compatible)
+  # ============================================================
+  minio:
+    image: minio/minio:RELEASE.2024-10-13T13-34-11Z
+    container_name: cm_minio
+    restart: unless-stopped
+    networks:
+      - backend
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_BROWSER_REDIRECT_URL: https://minio-console.${DOMAIN}
+      # Chiffrement au repos (SSE-KMS via clé locale) — voir 2.3 dans la documentation
+      MINIO_KMS_SECRET_KEY: ${MINIO_KMS_SECRET_KEY}
+    volumes:
+      - minio_data:/data
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=backend"
+      # API S3 (utilisée uniquement par le backend, jamais exposée publiquement)
+      # Console d'administration exposée en HTTPS, protégée par IP allowlist
+      - "traefik.http.routers.minio-console.rule=Host(`minio-console.${DOMAIN}`)"
+      - "traefik.http.routers.minio-console.entrypoints=websecure"
+      - "traefik.http.routers.minio-console.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.minio-console.service=minio-console-svc"
+      - "traefik.http.services.minio-console-svc.loadbalancer.server.port=9001"
+      - "traefik.http.routers.minio-console.middlewares=admin-auth,admin-ipwhitelist"
+
+  minio-init:
+    image: minio/mc:RELEASE.2024-10-08T09-37-26Z
+    container_name: cm_minio_init
+    networks:
+      - backend
+    depends_on:
+      minio:
+        condition: service_healthy
+    volumes:
+      - ./minio/bucket-policy.json:/policies/bucket-policy.json:ro
+      - ./minio/lifecycle-policy.json:/policies/lifecycle-policy.json:ro
+      - ./scripts/init_minio.sh:/scripts/init_minio.sh:ro
+    entrypoint: ["/bin/sh", "/scripts/init_minio.sh"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      APP_ACCESS_KEY: ${MINIO_APP_ACCESS_KEY}
+      APP_SECRET_KEY: ${MINIO_APP_SECRET_KEY}
+    restart: "no"

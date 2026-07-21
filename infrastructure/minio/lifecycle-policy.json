@@ -1,0 +1,25 @@
+{
+  "Rules": [
+    {
+      "ID": "expire-old-db-backups",
+      "Status": "Enabled",
+      "Filter": { "Prefix": "" },
+      "Expiration": { "Days": 30 }
+    },
+    {
+      "ID": "transition-old-documents-to-cold-tier",
+      "Status": "Enabled",
+      "Filter": { "Prefix": "archives/" },
+      "Transition": {
+        "Days": 365,
+        "StorageClass": "STANDARD_IA"
+      }
+    },
+    {
+      "ID": "abort-incomplete-multipart-uploads",
+      "Status": "Enabled",
+      "Filter": { "Prefix": "" },
+      "AbortIncompleteMultipartUpload": { "DaysAfterInitiation": 7 }
+    }
+  ]
+}

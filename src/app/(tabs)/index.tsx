@@ -1,7 +1,9 @@
 import { AppColors as C } from '@/constants/theme';
 import {
-    affaires, audiences, factures, notifications,
+    audiences, factures, notifications,
 } from '@/data/mockData';
+import { useAuth } from '@/hooks/useAuth';
+import { useDossiers } from '@/hooks/useDossiers';
 import { useRouter } from 'expo-router';
 import {
     AlertTriangle,
@@ -23,14 +25,20 @@ import {
     StyleSheet,
     Text,
     TouchableOpacity,
-    View,
+    View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function DashboardScreen() {
   const router = useRouter();
+  const { user } = useAuth();
 
-  const affairesActives = affaires.filter(a => a.statut === 'en_cours' || a.statut === 'ouverte').length;
+  // Dossiers réels depuis le backend
+  const { dossiers, isLoading: loadingDossiers, total: totalDossiers } = useDossiers({ pageSize: 50 });
+
+  const affairesActives = dossiers.filter(
+    d => d.statut === 'Ouvert' || d.statut === 'En cours'
+  ).length;
 
   const today = new Date();
   const in7days = new Date(); in7days.setDate(today.getDate() + 7);
@@ -55,9 +63,8 @@ export default function DashboardScreen() {
     .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
     .slice(0, 3);
 
-  const affairesCritiques = affaires
-    .filter(a => a.risqueImpaye === 'eleve')
-    .slice(0, 3);
+  // Dossiers récents (remplace les "affaires critiques" jusqu'à l'ajout d'un endpoint stats)
+  const dossiersRecents = dossiers.slice(0, 3);
 
   const fmtDate = (d: string) => new Intl.DateTimeFormat('fr-FR', {
     day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
@@ -77,7 +84,9 @@ export default function DashboardScreen() {
           <View style={s.header}>
             <View>
               <Text style={s.headerTitle}>Tableau de bord</Text>
-              <Text style={s.headerSub}>Cabinet Manager</Text>
+              <Text style={s.headerSub}>
+                {user ? `${user.nom} · ${user.role}` : 'Cabinet Manager'}
+              </Text>
             </View>
             <View style={s.headerRight}>
               <TouchableOpacity style={s.bellBtn} onPress={() => router.push('/notifications')}>
