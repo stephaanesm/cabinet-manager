@@ -30,7 +30,15 @@
         }
       ],
       "expo-asset",
-      "expo-font"
+      "expo-font",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "extraProguardRules": "-keep class expo.modules.securestore.** { *; }\n-keep class com.facebook.jni.** { *; }"
+          }
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true

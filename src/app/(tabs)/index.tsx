@@ -40,6 +40,12 @@ export default function DashboardScreen() {
     d => d.statut === 'Ouvert' || d.statut === 'En cours'
   ).length;
 
+  // Dossiers récemment ouverts, triés par date (les plus récents en premier)
+  const affairesCritiques = dossiers
+    .filter(d => d.statut === 'Ouvert' || d.statut === 'En cours')
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+    .slice(0, 3);
+
   const today = new Date();
   const in7days = new Date(); in7days.setDate(today.getDate() + 7);
   const prochaines7Jours = audiences.filter(a => {
@@ -224,7 +230,7 @@ export default function DashboardScreen() {
           {affairesCritiques.length > 0 && (
             <View style={s.section}>
               <View style={s.sectionHeader}>
-                <Text style={s.sectionTitle}>Affaires critiques</Text>
+                <Text style={s.sectionTitle}>Affaires récentes</Text>
                 <TouchableOpacity onPress={() => router.push('/(tabs)/affaires')}>
                   <Text style={s.sectionLink}>Voir tout</Text>
                 </TouchableOpacity>
@@ -237,12 +243,11 @@ export default function DashboardScreen() {
                   activeOpacity={0.8}
                 >
                   <View style={{ flex: 1 }}>
-                    <Text style={s.critTitle} numberOfLines={1}>{a.intitule}</Text>
-                    <Text style={s.critClient}>{a.client.nom}</Text>
-                    <Text style={s.critMeta}>{a.numero} • {a.avocatResponsable.nom}</Text>
+                    <Text style={s.critTitle} numberOfLines={1}>{a.titre}</Text>
+                    <Text style={s.critMeta}>{a.numeroAffaire}{a.juridiction ? ` • ${a.juridiction}` : ''}</Text>
                   </View>
                   <View style={s.critBadge}>
-                    <Text style={s.critBadgeText}>Risque élevé</Text>
+                    <Text style={s.critBadgeText}>{a.statut}</Text>
                   </View>
                 </TouchableOpacity>
               ))}
