@@ -1,0 +1,72 @@
+# ==============================================================================
+# CABINET MANAGER — docker-compose.dev.yml
+# Stack de développement local minimaliste : PostgreSQL + Backend NestJS
+# Pas de Traefik, pas de réplication, pas de MinIO.
+#
+# Usage :
+#   docker compose -f docker-compose.dev.yml up -d
+#   docker compose -f docker-compose.dev.yml logs -f backend
+#   docker compose -f docker-compose.dev.yml down
+# ==============================================================================
+
+services:
+
+  postgres:
+    image: postgres:16.4
+    container_name: cm_dev_postgres
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: cabinet_manager
+      POSTGRES_USER: cm_admin
+      POSTGRES_PASSWORD: devpassword123
+    volumes:
+      - cm_dev_postgres_data:/var/lib/postgresql/data
+      - ./backend/migrations/migration_001_schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+      - ./backend/migrations/migration_002_auth_module.sql:/docker-entrypoint-initdb.d/02_auth.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cm_admin -d cabinet_manager"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: runner
+    container_name: cm_dev_backend
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      PORT: 8080
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: cabinet_manager
+      DB_USER: cm_admin
+      DB_PASSWORD: devpassword123
+      JWT_ACCESS_SECRET: 42a78bc615de4aa6f5031a09a5cf89807ca1ed930df1832e4e15c46d3c5d10594aeeef1dffa4e4075873eefc639b9f085aa47bc17fdfd53a621f463b3281a8bf
+      JWT_REFRESH_SECRET: 05df89ddca25b674d9e58c4bc5df0ea117793c20f0193a443238c611db3defb8c52663c837273cd80e34c426075c48cc72e75929d9fb38f076d8e455128f63a8
+      TOTP_ENCRYPTION_KEY: d6bc7d711afd7c4d51b91e52ab92e5b086d76338685de2f7192797cf58767c52
+      MINIO_ENDPOINT: localhost
+      MINIO_PORT: 9000
+      MINIO_USE_SSL: "false"
+      MINIO_ACCESS_KEY: dev_access
+      MINIO_SECRET_KEY: dev_secret
+      MINIO_BUCKET_DOCUMENTS: cabinet-manager-documents
+      CORS_ORIGINS: http://localhost:8081,http://localhost:19000,http://localhost:19006,http://10.0.2.2:8081,exp://localhost:19000
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/api/v1/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  cm_dev_postgres_data:

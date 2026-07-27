@@ -2,30 +2,28 @@
  * backend/src/app.module.ts
  * ---------------------------------------------------------------------------
  * Module racine de l'application Cabinet Manager.
- *
- * Responsabilités :
- *  - Connexion TypeORM → PostgreSQL (variables d'env DB_*)
- *  - Assemblage de tous les modules métier
- *  - Gestion de la configuration globale via variables d'environnement
- *
- * IMPORTANT MULTI-TENANT : la connexion utilise cm_app_user en production
- * (droits restreints via grants_app_role.sql). En développement, cm_admin
- * est acceptable pour les migrations. Ne jamais utiliser cm_admin en prod.
  * ---------------------------------------------------------------------------
  */
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+
+import { AudiencesModule } from './modules/audiences/audiences.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { ClientsModule } from './modules/clients/clients.module';
+import { DocumentsModule } from './modules/documents/documents.module';
 import { DossiersModule } from './modules/dossiers/dossiers.module';
+import { FacturationModule } from './modules/facturation/facturation.module';
 import { JournalModule } from './modules/journal/journal.module';
 import { UsersModule } from './modules/users/users.module';
 
-// Entités TypeORM — toutes déclarées ici pour la découverte automatique
 import { HealthController } from './health.controller';
+import { Audience } from './modules/audiences/entities/audience.entity';
 import { RefreshToken } from './modules/auth/entities/refresh-token.entity';
 import { Client } from './modules/clients/entities/client.entity';
+import { Document } from './modules/documents/entities/document.entity';
 import { Dossier } from './modules/dossiers/entities/dossier.entity';
+import { Encaissement } from './modules/facturation/entities/encaissement.entity';
+import { Facture } from './modules/facturation/entities/facture.entity';
 import { JournalActivite } from './modules/journal/entities/journal-activite.entity';
 import { Cabinet } from './modules/users/entities/cabinet.entity';
 import { RoleAcces } from './modules/users/entities/role-acces.entity';
@@ -33,7 +31,6 @@ import { Utilisateur } from './modules/users/entities/utilisateur.entity';
 
 @Module({
   imports: [
-    // ── Base de données ────────────────────────────────────────────────────
     TypeOrmModule.forRoot({
       type: 'postgres',
       host: process.env.DB_HOST ?? 'localhost',
@@ -49,23 +46,23 @@ import { Utilisateur } from './modules/users/entities/utilisateur.entity';
         Dossier,
         Client,
         JournalActivite,
+        Audience,
+        Document,
+        Facture,
+        Encaissement,
       ],
-      // NE PAS activer synchronize en production → utiliser les migrations SQL
-      // (voir backend/migrations/ et infrastructure/postgres/)
-      synchronize: process.env.NODE_ENV === 'development',
+      synchronize: false,
       logging: process.env.NODE_ENV === 'development' ? ['query', 'error'] : ['error'],
-      ssl: process.env.NODE_ENV === 'production'
-        ? { rejectUnauthorized: true }
-        : false,
+      ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: true } : false,
     }),
-
-    // ── Modules métier ────────────────────────────────────────────────────
-    // Ordre : UsersModule en premier car AuthModule en dépend.
     UsersModule,
     AuthModule,
     ClientsModule,
     JournalModule,
     DossiersModule,
+    AudiencesModule,
+    DocumentsModule,
+    FacturationModule,
   ],
   controllers: [HealthController],
 })
