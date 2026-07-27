@@ -1,15 +1,14 @@
 import { useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView,
-  KeyboardAvoidingView, Platform, Alert,
+  KeyboardAvoidingView, Platform, Alert, ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { ArrowLeft, Save, User, Building2 } from 'lucide-react-native';
 import { AppColors as C } from '@/constants/theme';
-
-const VILLES = ['Yaoundé', 'Douala', 'Bafoussam', 'Garoua', 'Maroua', 'Ngaoundéré', 'Bertoua', 'Ebolowa', 'Kumba', 'Bamenda', 'Limbe', 'Buea'];
-const FORMES = ['SA', 'SARL', 'SNC', 'SCS', 'GIE', 'Établissement', 'Autre'];
+import { createClient } from '@/services/clients.service';
+import { extractErrorMessage } from '@/lib/api';
 
 type ClientType = 'personne_physique' | 'personne_morale';
 
@@ -21,53 +20,58 @@ export default function NouveauClientScreen() {
   const [prenom, setPrenom] = useState('');
   const [tel, setTel] = useState('');
   const [email, setEmail] = useState('');
-  const [ville, setVille] = useState('');
-  const [cni, setCni] = useState('');
 
   const [raisonSociale, setRaisonSociale] = useState('');
-  const [formeJuridique, setFormeJuridique] = useState('');
-  const [rccm, setRccm] = useState('');
-  const [emailEnt, setEmailEnt] = useState('');
   const [telEnt, setTelEnt] = useState('');
-  const [villeEnt, setVilleEnt] = useState('');
-  const [referent, setReferent] = useState('');
+  const [emailEnt, setEmailEnt] = useState('');
+
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState('');
 
   const accent = type === 'personne_morale' ? C.blue600 : C.amber500;
 
-  const handleSubmit = () => {
-    Alert.alert('Succès', 'Client créé avec succès !', [{ text: 'OK', onPress: () => router.back() }]);
+  const handleSubmit = async () => {
+    const nomComplet = type === 'personne_physique'
+      ? `${nom.trim()} ${prenom.trim()}`.trim()
+      : raisonSociale.trim();
+
+    const phone = type === 'personne_physique' ? tel.trim() : telEnt.trim();
+    const mail = type === 'personne_physique' ? email.trim() : emailEnt.trim();
+
+    if (!nomComplet) {
+      setError('Veuillez saisir le nom du client.');
+      return;
+    }
+
+    setError('');
+    setIsLoading(true);
+    try {
+      await createClient({
+        nomComplet,
+        telephone: phone,
+        email: mail,
+      });
+      Alert.alert('Succès', 'Client créé avec succès dans la base de données !', [
+        { text: 'OK', onPress: () => router.back() },
+      ]);
+    } catch (e) {
+      setError(extractErrorMessage(e));
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const Field = ({ label, value, onChangeText, placeholder, keyboardType = 'default', multiline = false, required = false }: any) => (
+  const Field = ({ label, value, onChangeText, placeholder, keyboardType = 'default', required = false }: any) => (
     <View style={sf.field}>
       <Text style={sf.label}>{label}{required && <Text style={{ color: C.red500 }}> *</Text>}</Text>
       <TextInput
-        style={[sf.input, multiline && { height: 80, textAlignVertical: 'top' }, { borderColor: C.gray200 }]}
+        style={[sf.input, { borderColor: C.gray200 }]}
         value={value}
         onChangeText={onChangeText}
         placeholder={placeholder}
         placeholderTextColor={C.gray400}
         keyboardType={keyboardType}
-        multiline={multiline}
       />
-    </View>
-  );
-
-  const SelectField = ({ label, value, onValueChange, options, required = false }: any) => (
-    <View style={sf.field}>
-      <Text style={sf.label}>{label}{required && <Text style={{ color: C.red500 }}> *</Text>}</Text>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
-        {options.map((opt: string) => (
-          <TouchableOpacity
-            key={opt}
-            onPress={() => onValueChange(opt)}
-            style={[sf.optBtn, value === opt && { backgroundColor: accent, borderColor: accent }]}
-            activeOpacity={0.8}
-          >
-            <Text style={[sf.optText, value === opt && { color: type === 'personne_morale' ? C.white : C.gray900 }]}>{opt}</Text>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
     </View>
   );
 
@@ -117,33 +121,29 @@ export default function NouveauClientScreen() {
             <>
               <View style={sf.card}>
                 <Field label="Nom" value={nom} onChangeText={setNom} placeholder="ATANGANA" required />
-                <Field label="Prénom" value={prenom} onChangeText={setPrenom} placeholder="Michel" required />
+                <Field label="Prénom" value={prenom} onChangeText={setPrenom} placeholder="Michel" />
               </View>
               <View style={sf.card}>
-                <Field label="Téléphone" value={tel} onChangeText={setTel} placeholder="+237 6XX XX XX XX" keyboardType="phone-pad" required />
+                <Field label="Téléphone" value={tel} onChangeText={setTel} placeholder="+237 6XX XX XX XX" keyboardType="phone-pad" />
                 <Field label="Email" value={email} onChangeText={setEmail} placeholder="email@exemple.com" keyboardType="email-address" />
-              </View>
-              <View style={sf.card}>
-                <SelectField label="Ville" value={ville} onValueChange={setVille} options={VILLES} required />
-              </View>
-              <View style={sf.card}>
-                <Field label="Numéro CNI" value={cni} onChangeText={setCni} placeholder="Ex: 123456789" />
               </View>
             </>
           ) : (
             <>
               <View style={sf.card}>
                 <Field label="Raison sociale" value={raisonSociale} onChangeText={setRaisonSociale} placeholder="Ex: CAMTEL SA" required />
-                <SelectField label="Forme juridique" value={formeJuridique} onValueChange={setFormeJuridique} options={FORMES} />
-                <Field label="N° RCCM" value={rccm} onChangeText={setRccm} placeholder="RC/YAO/AAAA/B/XXXXX" />
               </View>
               <View style={sf.card}>
-                <Field label="Téléphone" value={telEnt} onChangeText={setTelEnt} placeholder="+237 6XX XX XX XX" keyboardType="phone-pad" required />
-                <Field label="Email" value={emailEnt} onChangeText={setEmailEnt} placeholder="juridique@entreprise.cm" keyboardType="email-address" required />
-                <SelectField label="Ville" value={villeEnt} onValueChange={setVilleEnt} options={VILLES} required />
-                <Field label="Référent / Contact" value={referent} onChangeText={setReferent} placeholder="Nom du directeur juridique..." />
+                <Field label="Téléphone" value={telEnt} onChangeText={setTelEnt} placeholder="+237 6XX XX XX XX" keyboardType="phone-pad" />
+                <Field label="Email" value={emailEnt} onChangeText={setEmailEnt} placeholder="juridique@entreprise.cm" keyboardType="email-address" />
               </View>
             </>
+          )}
+
+          {error !== '' && (
+            <View style={sf.errorBox}>
+              <Text style={sf.errorText}>{error}</Text>
+            </View>
           )}
 
           {/* Buttons */}
@@ -151,9 +151,15 @@ export default function NouveauClientScreen() {
             <TouchableOpacity style={sf.cancelBtn} onPress={() => router.back()} activeOpacity={0.8}>
               <Text style={sf.cancelText}>Annuler</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={[sf.saveBtn, { backgroundColor: accent }]} onPress={handleSubmit} activeOpacity={0.85}>
-              <Save color={type === 'personne_morale' ? C.white : C.gray900} size={20} />
-              <Text style={[sf.saveText, { color: type === 'personne_morale' ? C.white : C.gray900 }]}>Enregistrer</Text>
+            <TouchableOpacity style={[sf.saveBtn, { backgroundColor: accent }]} onPress={handleSubmit} disabled={isLoading} activeOpacity={0.85}>
+              {isLoading ? (
+                <ActivityIndicator color={C.white} />
+              ) : (
+                <>
+                  <Save color={type === 'personne_morale' ? C.white : C.gray900} size={20} />
+                  <Text style={[sf.saveText, { color: type === 'personne_morale' ? C.white : C.gray900 }]}>Enregistrer</Text>
+                </>
+              )}
             </TouchableOpacity>
           </View>
         </ScrollView>
@@ -177,11 +183,11 @@ const sf = StyleSheet.create({
   field: { gap: 8 },
   label: { fontSize: 14, fontWeight: '600', color: C.gray900 },
   input: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, color: C.gray900 },
-  optBtn: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, borderWidth: 1, borderColor: C.gray200, backgroundColor: C.white },
-  optText: { fontSize: 13, fontWeight: '500', color: C.gray600 },
   btnRow: { flexDirection: 'row', gap: 12, marginTop: 8 },
   cancelBtn: { flex: 1, borderWidth: 1, borderColor: C.gray300, borderRadius: 14, paddingVertical: 14, alignItems: 'center' },
   cancelText: { fontSize: 15, fontWeight: '600', color: C.gray700 },
   saveBtn: { flex: 1, borderRadius: 14, paddingVertical: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
   saveText: { fontSize: 15, fontWeight: '600' },
+  errorBox: { backgroundColor: C.red50, borderWidth: 1, borderColor: C.red200, borderRadius: 12, padding: 12 },
+  errorText: { color: C.red700, fontSize: 13, textAlign: 'center' },
 });

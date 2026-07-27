@@ -166,7 +166,7 @@ export default function AffairesScreen() {
       />
 
       {/* FAB */}
-      <TouchableOpacity style={s.fab} activeOpacity={0.85}>
+      <TouchableOpacity style={s.fab} onPress={() => router.push('/nouvelle-affaire')} activeOpacity={0.85}>
         <Plus color={C.gray900} size={28} />
       </TouchableOpacity>
     </View>

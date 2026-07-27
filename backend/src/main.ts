@@ -33,10 +33,11 @@ async function bootstrap() {
   app.useGlobalFilters(new HttpExceptionFilter());
 
   // ── CORS ──────────────────────────────────────────────────────────────────
+  const isDev = process.env.NODE_ENV === 'development';
   const originsEnv = process.env.CORS_ORIGINS ?? '';
   const allowedOrigins = originsEnv.split(',').map((o) => o.trim()).filter(Boolean);
   app.enableCors({
-    origin: allowedOrigins.length > 0 ? allowedOrigins : false,
+    origin: isDev ? true : (allowedOrigins.length > 0 ? allowedOrigins : false),
     methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
     credentials: true,
   });

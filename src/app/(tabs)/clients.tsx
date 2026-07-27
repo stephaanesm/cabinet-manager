@@ -1,34 +1,32 @@
 import { useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet, FlatList,
-  Modal, ScrollView, Linking,
+  Modal, ScrollView, Linking, ActivityIndicator, RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import {
-  Search, Plus, Phone, Mail, MapPin, Building2, User,
-  ChevronRight, Briefcase, X,
+  Search, Plus, Phone, Mail, MapPin, User,
+  ChevronRight, X, AlertCircle,
 } from 'lucide-react-native';
 import { AppColors as C } from '@/constants/theme';
-import { clients, affaires, type Client } from '@/data/mockData';
-
-type TypeFilter = 'all' | 'personne_physique' | 'personne_morale';
+import { useClients } from '@/hooks/useClients';
+import { Client } from '@/services/clients.service';
 
 export default function ClientsScreen() {
   const router = useRouter();
   const [search, setSearch] = useState('');
-  const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
   const [selected, setSelected] = useState<Client | null>(null);
 
-  const filtered = clients.filter(c => {
-    const q = search.toLowerCase();
-    const fullName = `${c.nom} ${c.prenom ?? ''} ${c.email} ${c.ville}`.toLowerCase();
-    return fullName.includes(q) && (typeFilter === 'all' || c.type === typeFilter);
+  const { clients, isLoading, error, total, refetch } = useClients({
+    search: search.trim() ? search.trim() : undefined,
   });
 
-  const getAffaires = (id: string) => affaires.filter(a => a.client.id === id);
-  const initials = (c: Client) => ((c.prenom?.[0] ?? '') + c.nom[0]).toUpperCase() || '?';
-  const avatarGrad = (type: string) => type === 'personne_morale' ? C.blue600 : C.amber500;
+  const initials = (c: Client) => {
+    const parts = c.nomComplet.trim().split(' ');
+    if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+    return c.nomComplet.slice(0, 2).toUpperCase() || '?';
+  };
 
   return (
     <View style={s.root}>
@@ -37,25 +35,11 @@ export default function ClientsScreen() {
         <View style={s.header}>
           <View>
             <Text style={s.title}>Clients</Text>
-            <Text style={s.sub}>Répertoire du cabinet</Text>
+            <Text style={s.sub}>{total} client{total > 1 ? 's' : ''} au total</Text>
           </View>
           <TouchableOpacity style={s.addBtn} onPress={() => router.push('/nouveau-client')} activeOpacity={0.8}>
             <Plus color={C.gray900} size={22} />
           </TouchableOpacity>
-        </View>
-
-        {/* Stats */}
-        <View style={s.statsRow}>
-          {[
-            { label: 'Total', value: clients.length, color: C.white },
-            { label: 'Entreprises', value: clients.filter(c => c.type === 'personne_morale').length, color: '#93c5fd' },
-            { label: 'Particuliers', value: clients.filter(c => c.type === 'personne_physique').length, color: C.amber400 },
-          ].map(stat => (
-            <View key={stat.label} style={s.statCard}>
-              <Text style={[s.statVal, { color: stat.color }]}>{stat.value}</Text>
-              <Text style={s.statLabel}>{stat.label}</Text>
-            </View>
-          ))}
         </View>
 
         {/* Search */}
@@ -74,73 +58,54 @@ export default function ClientsScreen() {
             </TouchableOpacity>
           )}
         </View>
-
-        {/* Type filter */}
-        <View style={s.typeRow}>
-          {([
-            { key: 'all', label: `Tous (${clients.length})` },
-            { key: 'personne_morale', label: `Entreprises (${clients.filter(c => c.type === 'personne_morale').length})` },
-            { key: 'personne_physique', label: `Particuliers (${clients.filter(c => c.type === 'personne_physique').length})` },
-          ] as { key: TypeFilter; label: string }[]).map(({ key, label }) => (
-            <TouchableOpacity
-              key={key}
-              onPress={() => setTypeFilter(key)}
-              style={[s.typeBtn, typeFilter === key && s.typeBtnActive]}
-              activeOpacity={0.8}
-            >
-              <Text style={[s.typeBtnText, typeFilter === key && s.typeBtnTextActive]}>{label}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
       </SafeAreaView>
 
+      {error && !isLoading && (
+        <View style={s.errorBanner}>
+          <AlertCircle color={C.red500} size={16} />
+          <Text style={s.errorText}>{error}</Text>
+          <TouchableOpacity onPress={refetch} style={s.retryBtn}>
+            <Text style={s.retryText}>Réessayer</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
       <FlatList
-        data={filtered}
-        keyExtractor={item => item.id}
+        data={clients}
+        keyExtractor={item => String(item.id)}
         contentContainerStyle={s.list}
         showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={isLoading && clients.length > 0} onRefresh={refetch} tintColor={C.amber500} />}
         ListEmptyComponent={
-          <View style={s.empty}>
-            <Text style={s.emptyText}>Aucun client trouvé</Text>
-          </View>
+          isLoading ? (
+            <View style={s.empty}><ActivityIndicator color={C.amber500} size="large" /></View>
+          ) : (
+            <View style={s.empty}>
+              <Text style={s.emptyText}>Aucun client trouvé dans la base de données</Text>
+            </View>
+          )
         }
-        renderItem={({ item: c }) => {
-          const cAffaires = getAffaires(c.id);
-          const actives = cAffaires.filter(a => a.statut === 'en_cours' || a.statut === 'ouverte').length;
-          return (
-            <TouchableOpacity style={s.card} onPress={() => setSelected(c)} activeOpacity={0.8}>
-              <View style={[s.avatar, { backgroundColor: avatarGrad(c.type) }]}>
-                <Text style={s.avatarText}>{initials(c)}</Text>
+        renderItem={({ item: c }) => (
+          <TouchableOpacity style={s.card} onPress={() => setSelected(c)} activeOpacity={0.8}>
+            <View style={[s.avatar, { backgroundColor: C.amber500 }]}>
+              <Text style={s.avatarText}>{initials(c)}</Text>
+            </View>
+            <View style={{ flex: 1, marginLeft: 12 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+                <Text style={s.clientName} numberOfLines={1}>{c.nomComplet}</Text>
+                <User color={C.amber500} size={13} />
               </View>
-              <View style={{ flex: 1, marginLeft: 12 }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 }}>
-                  <Text style={s.clientName} numberOfLines={1}>
-                    {c.nom}{c.prenom ? ` ${c.prenom}` : ''}
-                  </Text>
-                  {c.type === 'personne_morale'
-                    ? <Building2 color={C.blue500} size={13} />
-                    : <User color={C.amber500} size={13} />}
+              {c.email ? <Text style={s.clientEmail} numberOfLines={1}>{c.email}</Text> : null}
+              {c.telephone ? (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 }}>
+                  <Phone color={C.gray400} size={11} />
+                  <Text style={s.clientMeta}>{c.telephone}</Text>
                 </View>
-                <Text style={s.clientEmail} numberOfLines={1}>{c.email}</Text>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 4 }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                    <MapPin color={C.gray400} size={11} />
-                    <Text style={s.clientMeta}>{c.ville}</Text>
-                  </View>
-                  {cAffaires.length > 0 && (
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                      <Briefcase color={C.amber600} size={11} />
-                      <Text style={[s.clientMeta, { color: C.amber600, fontWeight: '500' }]}>
-                        {cAffaires.length} affaire(s){actives > 0 ? ` · ${actives} actives` : ''}
-                      </Text>
-                    </View>
-                  )}
-                </View>
-              </View>
-              <ChevronRight color={C.gray300} size={18} />
-            </TouchableOpacity>
-          );
-        }}
+              ) : null}
+            </View>
+            <ChevronRight color={C.gray300} size={18} />
+          </TouchableOpacity>
+        )}
       />
 
       <TouchableOpacity style={s.fab} onPress={() => router.push('/nouveau-client')} activeOpacity={0.85}>
@@ -156,76 +121,32 @@ export default function ClientsScreen() {
               <ScrollView showsVerticalScrollIndicator={false}>
                 {/* Avatar + Name */}
                 <View style={s.sheetHeader}>
-                  <View style={[s.avatarLg, { backgroundColor: avatarGrad(selected.type) }]}>
+                  <View style={[s.avatarLg, { backgroundColor: C.amber500 }]}>
                     <Text style={s.avatarLgText}>{initials(selected)}</Text>
                   </View>
                   <View style={{ flex: 1, marginLeft: 12 }}>
-                    <Text style={s.sheetName}>
-                      {selected.nom}{selected.prenom ? ` ${selected.prenom}` : ''}
-                    </Text>
-                    <View style={[s.typePill, selected.type === 'personne_morale' ? s.typePillBlue : s.typePillAmber]}>
-                      {selected.type === 'personne_morale'
-                        ? <Building2 color={C.blue700} size={11} />
-                        : <User color={C.amber700} size={11} />}
-                      <Text style={[s.typePillText, selected.type === 'personne_morale' ? { color: C.blue700 } : { color: C.amber700 }]}>
-                        {selected.type === 'personne_morale' ? 'Personne morale' : 'Personne physique'}
-                      </Text>
-                    </View>
+                    <Text style={s.sheetName}>{selected.nomComplet}</Text>
                   </View>
                 </View>
 
                 {/* Contact */}
                 <View style={s.contactBox}>
-                  <TouchableOpacity style={s.contactRow} onPress={() => Linking.openURL(`tel:${selected.telephone}`)}>
-                    <Phone color={C.gray400} size={16} />
-                    <Text style={s.contactLink}>{selected.telephone}</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={s.contactRow} onPress={() => Linking.openURL(`mailto:${selected.email}`)}>
-                    <Mail color={C.gray400} size={16} />
-                    <Text style={[s.contactLink, { flex: 1 }]} numberOfLines={1}>{selected.email}</Text>
-                  </TouchableOpacity>
-                  <View style={s.contactRow}>
-                    <MapPin color={C.gray400} size={16} />
-                    <Text style={s.contactText}>{selected.ville}, Cameroun</Text>
-                  </View>
+                  {selected.telephone ? (
+                    <TouchableOpacity style={s.contactRow} onPress={() => Linking.openURL(`tel:${selected.telephone}`)}>
+                      <Phone color={C.gray400} size={16} />
+                      <Text style={s.contactLink}>{selected.telephone}</Text>
+                    </TouchableOpacity>
+                  ) : null}
+                  {selected.email ? (
+                    <TouchableOpacity style={s.contactRow} onPress={() => Linking.openURL(`mailto:${selected.email}`)}>
+                      <Mail color={C.gray400} size={16} />
+                      <Text style={[s.contactLink, { flex: 1 }]} numberOfLines={1}>{selected.email}</Text>
+                    </TouchableOpacity>
+                  ) : null}
                 </View>
 
-                {/* Affaires liées */}
-                {(() => {
-                  const cAffaires = getAffaires(selected.id);
-                  return cAffaires.length > 0 ? (
-                    <View style={s.affSection}>
-                      <Text style={s.sheetSectionTitle}>Affaires ({cAffaires.length})</Text>
-                      {cAffaires.map(a => (
-                        <TouchableOpacity
-                          key={a.id}
-                          style={s.affRow}
-                          onPress={() => {
-                            setSelected(null);
-                            router.push({ pathname: '/affaire/[id]', params: { id: a.id } });
-                          }}
-                          activeOpacity={0.8}
-                        >
-                          <View style={{ flex: 1 }}>
-                            <Text style={s.affTitle} numberOfLines={1}>{a.intitule}</Text>
-                            <Text style={s.affMeta}>{a.numero} • {a.domaine}</Text>
-                          </View>
-                          <View style={[s.affStatusBadge, a.statut === 'en_cours' ? { backgroundColor: C.orange100 } : a.statut === 'gagnee' ? { backgroundColor: C.green100 } : { backgroundColor: C.gray100 }]}>
-                            <Text style={[s.affStatusText, a.statut === 'en_cours' ? { color: C.orange700 } : a.statut === 'gagnee' ? { color: C.green700 } : { color: C.gray700 }]}>
-                              {a.statut.replace('_', ' ')}
-                            </Text>
-                          </View>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
-                  ) : null;
-                })()}
-
                 {/* Actions */}
-                <View style={{ gap: 10, marginTop: 8 }}>
-                  <TouchableOpacity style={s.primaryBtn} activeOpacity={0.85}>
-                    <Text style={s.primaryBtnText}>+ Créer une affaire pour ce client</Text>
-                  </TouchableOpacity>
+                <View style={{ marginTop: 8 }}>
                   <TouchableOpacity style={s.closeBtn} onPress={() => setSelected(null)} activeOpacity={0.8}>
                     <Text style={s.closeBtnText}>Fermer</Text>
                   </TouchableOpacity>
@@ -245,22 +166,21 @@ const s = StyleSheet.create({
   title: { fontSize: 22, fontWeight: '700', color: C.white },
   sub: { fontSize: 13, color: C.amber400, marginTop: 2 },
   addBtn: { width: 40, height: 40, backgroundColor: C.amber500, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
-  statsRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 16, marginBottom: 8 },
-  statCard: { flex: 1, backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 12, padding: 10, alignItems: 'center' },
-  statVal: { fontSize: 20, fontWeight: '700' },
-  statLabel: { fontSize: 11, color: C.gray400, marginTop: 2 },
   searchWrap: {
     flexDirection: 'row', alignItems: 'center', gap: 8,
     backgroundColor: C.white, borderWidth: 1, borderColor: C.gray200,
-    borderRadius: 12, marginHorizontal: 16, paddingHorizontal: 12, marginBottom: 8,
+    borderRadius: 12, marginHorizontal: 16, paddingHorizontal: 12, marginBottom: 12,
     shadowColor: C.black, shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.06, shadowRadius: 2, elevation: 1,
   },
   searchInput: { flex: 1, paddingVertical: 12, fontSize: 14, color: C.gray900 },
-  typeRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 16, paddingBottom: 12, flexWrap: 'wrap' },
-  typeBtn: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 10, borderWidth: 1, borderColor: C.gray200, backgroundColor: C.white },
-  typeBtnActive: { backgroundColor: C.amber500, borderColor: C.amber500 },
-  typeBtnText: { fontSize: 12, fontWeight: '500', color: C.gray600 },
-  typeBtnTextActive: { color: C.gray900 },
+  errorBanner: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    margin: 12, padding: 12,
+    backgroundColor: C.red50, borderRadius: 12, borderWidth: 1, borderColor: C.red200,
+  },
+  errorText: { flex: 1, fontSize: 13, color: C.red700 },
+  retryBtn: { paddingHorizontal: 10, paddingVertical: 4, backgroundColor: C.red100, borderRadius: 8 },
+  retryText: { fontSize: 12, color: C.red700, fontWeight: '600' },
   list: { padding: 12, paddingBottom: 100, gap: 10 },
   empty: { alignItems: 'center', paddingTop: 60 },
   emptyText: { fontSize: 15, color: C.gray500 },
@@ -280,7 +200,6 @@ const s = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
     shadowColor: C.amber600, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.4, shadowRadius: 8, elevation: 8,
   },
-  // Modal
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
   sheet: {
     backgroundColor: C.white, borderTopLeftRadius: 24, borderTopRightRadius: 24,
@@ -291,23 +210,9 @@ const s = StyleSheet.create({
   avatarLg: { width: 64, height: 64, borderRadius: 32, alignItems: 'center', justifyContent: 'center' },
   avatarLgText: { color: C.white, fontWeight: '700', fontSize: 22 },
   sheetName: { fontSize: 20, fontWeight: '700', color: C.gray900, marginBottom: 6 },
-  typePill: { flexDirection: 'row', alignItems: 'center', gap: 4, borderRadius: 20, paddingHorizontal: 8, paddingVertical: 4, alignSelf: 'flex-start' },
-  typePillBlue: { backgroundColor: C.blue100 },
-  typePillAmber: { backgroundColor: C.amber100 },
-  typePillText: { fontSize: 12, fontWeight: '500' },
   contactBox: { backgroundColor: C.gray50, borderRadius: 14, padding: 14, marginBottom: 16, gap: 12 },
   contactRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   contactLink: { fontSize: 14, color: C.blue600, fontWeight: '500' },
-  contactText: { fontSize: 14, color: C.gray700 },
-  affSection: { marginBottom: 16 },
-  sheetSectionTitle: { fontSize: 15, fontWeight: '700', color: C.gray900, marginBottom: 10 },
-  affRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.gray50, borderRadius: 12, padding: 12, marginBottom: 8 },
-  affTitle: { fontSize: 13, fontWeight: '500', color: C.gray900 },
-  affMeta: { fontSize: 12, color: C.gray500, marginTop: 2 },
-  affStatusBadge: { borderRadius: 20, paddingHorizontal: 8, paddingVertical: 4, marginLeft: 8 },
-  affStatusText: { fontSize: 11, fontWeight: '500' },
-  primaryBtn: { backgroundColor: C.amber500, borderRadius: 14, paddingVertical: 14, alignItems: 'center' },
-  primaryBtnText: { fontSize: 15, fontWeight: '600', color: C.gray900 },
   closeBtn: { borderWidth: 1, borderColor: C.gray200, borderRadius: 14, paddingVertical: 14, alignItems: 'center' },
   closeBtnText: { fontSize: 14, fontWeight: '500', color: C.gray500 },
 });

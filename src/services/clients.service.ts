@@ -8,14 +8,15 @@ import api from '@/lib/api';
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export interface Client {
-  id: number;
-  cabinetId: number;
+  id: number | string;  // bigint PostgreSQL serialisé en string
+  cabinetId: number | string;
   nomComplet: string;
-  telephone: string;
-  email: string;
+  telephone: string | null;
+  email: string | null;
   version: number;
-  createdAt: string;
-  updatedAt: string;
+  createdAt?: string;
+  updatedAt?: string;
+  deletedAt?: string | null;
 }
 
 export interface ClientsPage {

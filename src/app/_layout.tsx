@@ -26,6 +26,7 @@ export default function RootLayout() {
           <Stack.Screen name="admin" />
           <Stack.Screen name="notifications" options={{ presentation: 'card' }} />
           <Stack.Screen name="nouveau-client" options={{ presentation: 'card' }} />
+          <Stack.Screen name="nouvelle-affaire" options={{ presentation: 'card' }} />
           <Stack.Screen name="affaire/[id]" options={{ presentation: 'card' }} />
         </Stack>
       </ThemeProvider>

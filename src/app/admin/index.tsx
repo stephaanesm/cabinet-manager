@@ -1,5 +1,6 @@
 import { AppColors as C } from '@/constants/theme';
 import { journalActivites, roles, utilisateursAdmin } from '@/data/adminData';
+import { useAuth } from '@/hooks/useAuth';
 import { useRouter } from 'expo-router';
 import {
     Activity,
@@ -8,6 +9,7 @@ import {
     CheckCircle,
     Key,
     Lock,
+    LogOut,
     ScrollText,
     Shield,
     TrendingUp,
@@ -24,13 +26,17 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { useAdminUsers } from '@/hooks/useAdminUsers';
+
 export default function AdminDashboard() {
   const router = useRouter();
+  const { user, logout } = useAuth();
+  const { users } = useAdminUsers();
 
-  const actifs   = utilisateursAdmin.filter(u => u.actif).length;
-  const inactifs = utilisateursAdmin.filter(u => !u.actif).length;
-  const sans2fa  = utilisateursAdmin.filter(u => u.actif && !u.authentif2FA).length;
-  const comptesBloques = utilisateursAdmin.filter(u => u.tentativesEchouees >= 3).length;
+  const actifs   = users.filter(u => u.actif).length;
+  const inactifs = users.filter(u => !u.actif).length;
+  const sans2fa  = 0;
+  const comptesBloques = 0;
 
   const logsAujourdhui = journalActivites.filter(l => {
     const d = new Date(l.horodatage);
@@ -70,17 +76,25 @@ export default function AdminDashboard() {
       <StatusBar barStyle="light-content" backgroundColor="#1a0a0a" />
       <SafeAreaView edges={['top']} style={{ backgroundColor: '#1a0a0a' }}>
         <View style={s.header}>
-          <TouchableOpacity onPress={() => router.replace('/(tabs)')} style={s.backBtn} activeOpacity={0.7}>
-            <ArrowLeft color={C.gray400} size={18} />
-            <Text style={s.backText}>App</Text>
-          </TouchableOpacity>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <TouchableOpacity onPress={() => router.replace('/(tabs)')} style={s.backBtn} activeOpacity={0.7}>
+              <ArrowLeft color={C.gray400} size={18} />
+              <Text style={s.backText}>App</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity onPress={logout} style={s.logoutHeaderBtn} activeOpacity={0.8}>
+              <LogOut color={C.red400} size={16} />
+              <Text style={s.logoutHeaderText}>Déconnexion</Text>
+            </TouchableOpacity>
+          </View>
+
           <View style={s.titleRow}>
             <View style={s.adminBadge}>
               <Shield color={C.white} size={18} />
             </View>
-            <View>
+            <View style={{ flex: 1 }}>
               <Text style={s.title}>Espace Administrateur</Text>
-              <Text style={s.sub}>Tchio Paul · Connecté</Text>
+              <Text style={s.sub}>{user ? `${user.nom} (${user.email})` : 'Administrateur'}</Text>
             </View>
           </View>
           <View style={s.secureTag}>
@@ -234,8 +248,10 @@ export default function AdminDashboard() {
 const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: C.gray50 },
   header: { padding: 16, paddingBottom: 14 },
-  backBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 14 },
+  backBtn: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   backText: { fontSize: 13, color: C.gray400 },
+  logoutHeaderBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(239, 68, 68, 0.15)', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(239, 68, 68, 0.3)' },
+  logoutHeaderText: { fontSize: 12, color: C.red400, fontWeight: '600' },
   titleRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 10 },
   adminBadge: {
     width: 44, height: 44, borderRadius: 22,

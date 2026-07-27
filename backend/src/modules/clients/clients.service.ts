@@ -1,16 +1,29 @@
 /**
- * modules/clients/clients.service.ts
- * ---------------------------------------------------------------------------
- * Volontairement réduit à ce dont le module Dossiers a besoin : vérifier
- * qu'un client existe (et appartient bien au même cabinet) avant de lui
- * rattacher un nouveau dossier. Le module Clients complet (CRUD, portail)
- * sera livré séparément.
- * ---------------------------------------------------------------------------
+ * backend/src/modules/clients/clients.service.ts
+ * Service complet de gestion des clients multi-tenant.
  */
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { IsNull, Like, Repository } from 'typeorm';
 import { Client } from './entities/client.entity';
+
+export interface CreateClientDto {
+  nomComplet: string;
+  telephone?: string;
+  email?: string;
+}
+
+export interface UpdateClientDto {
+  nomComplet?: string;
+  telephone?: string;
+  email?: string;
+}
+
+export interface QueryClientsDto {
+  search?: string;
+  page?: number;
+  pageSize?: number;
+}
 
 @Injectable()
 export class ClientsService {
@@ -19,16 +32,9 @@ export class ClientsService {
     private readonly clientRepository: Repository<Client>,
   ) {}
 
-  /**
-   * Vérifie que le client existe, n'est pas supprimé, et appartient bien au
-   * cabinet de l'utilisateur courant (isolation multi-tenant). Lève 404
-   * plutôt que 403 si le client appartient à un autre cabinet, pour ne pas
-   * révéler son existence (cohérent avec la politique définie dans les
-   * spécifications d'API, section 1.3).
-   */
   async verifierAppartenance(clientId: number, cabinetId: number): Promise<Client> {
     const client = await this.clientRepository.findOne({
-      where: { id: clientId, cabinetId, deletedAt: undefined },
+      where: { id: clientId, cabinetId, deletedAt: IsNull() },
     });
 
     if (!client) {
@@ -38,5 +44,58 @@ export class ClientsService {
     }
 
     return client;
+  }
+
+  async findAll(query: QueryClientsDto, cabinetId: number) {
+    const page = query.page ?? 1;
+    const pageSize = query.pageSize ?? 50;
+
+    const whereCondition: any = { cabinetId, deletedAt: IsNull() };
+    if (query.search) {
+      whereCondition.nomComplet = Like(`%${query.search.trim()}%`);
+    }
+
+    const [data, total] = await this.clientRepository.findAndCount({
+      where: whereCondition,
+      order: { id: 'DESC' },
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+    });
+
+    return { page, pageSize, total, data };
+  }
+
+  async findOne(id: number, cabinetId: number): Promise<Client> {
+    return this.verifierAppartenance(id, cabinetId);
+  }
+
+  async create(dto: CreateClientDto, cabinetId: number): Promise<Client> {
+    const client = this.clientRepository.create({
+      cabinetId,
+      nomComplet: dto.nomComplet.trim(),
+      telephone: dto.telephone?.trim() ?? null,
+      email: dto.email?.trim().toLowerCase() ?? null,
+      version: 1,
+      deletedAt: null,
+    });
+
+    return this.clientRepository.save(client);
+  }
+
+  async update(id: number, dto: UpdateClientDto, cabinetId: number): Promise<Client> {
+    const client = await this.verifierAppartenance(id, cabinetId);
+
+    if (dto.nomComplet !== undefined) client.nomComplet = dto.nomComplet.trim();
+    if (dto.telephone !== undefined) client.telephone = dto.telephone.trim() || null;
+    if (dto.email !== undefined) client.email = dto.email.trim().toLowerCase() || null;
+    client.version += 1;
+
+    return this.clientRepository.save(client);
+  }
+
+  async delete(id: number, cabinetId: number): Promise<void> {
+    const client = await this.verifierAppartenance(id, cabinetId);
+    client.deletedAt = new Date();
+    await this.clientRepository.save(client);
   }
 }
