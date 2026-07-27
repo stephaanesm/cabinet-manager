@@ -7,7 +7,7 @@ const argon2 = require('argon2');
 const { Client } = require('pg');
 
 async function run() {
-  const password = process.env.ADMIN_PASSWORD || 'Admin@2025!';
+  const password = process.env.ADMIN_PASSWORD || 'Admin123';
   const email    = process.env.ADMIN_EMAIL    || 'admin@cabinetmanager.cm';
 
   console.log(`Génération du hash argon2id pour ${email}...`);
