@@ -4,22 +4,11 @@
  *
  * Priorité de résolution :
  *  1. Variable d'environnement EXPO_PUBLIC_API_URL (EAS Build / .env.local)
- *  2. Détection automatique selon la plateforme (développement)
- *
- * En production, EXPO_PUBLIC_API_URL doit pointer vers l'URL Traefik :
- *   https://api.cabinetmanager.cm/api/v1
- *   (voir infrastructure/traefik/dynamic_conf.yml — router "api-router")
- *
- * En développement (si EXPO_PUBLIC_API_URL n'est pas défini) :
- *   - Émulateur Android  → http://10.0.2.2:8080/api/v1
- *   - iOS simulator       → http://localhost:8080/api/v1
- *   - Expo Go / appareil  → définir EXPO_PUBLIC_API_URL dans .env.local
- *                           avec l'IP LAN du PC (ex: http://192.168.x.x:8080/api/v1)
- *
- * Pour changer l'IP locale rapidement :
- *   Modifier EXPO_PUBLIC_API_URL dans le fichier .env.local à la racine du projet.
+ *  2. Détection automatique de l'IP du PC hôte via Expo Constants (Expo Go / Smartphone physique)
+ *  3. Fallback Émulateur / Simulator / Localhost
  */
 
+import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 
 function resolveApiBaseUrl(): string {
@@ -30,16 +19,26 @@ function resolveApiBaseUrl(): string {
 
   // 2. Détection automatique en développement
   if (__DEV__) {
+    // Tenter d'extraire l'IP LAN du PC hôte depuis Expo Constants (sur smartphone physique via Expo Go)
+    const hostUri = Constants.expoConfig?.hostUri || (Constants.manifest2?.extra?.expoGo as any)?.debuggerHost;
+    if (hostUri) {
+      const hostIp = hostUri.split(':')[0];
+      if (hostIp && hostIp !== 'localhost' && hostIp !== '127.0.0.1') {
+        return `http://${hostIp}:8080/api/v1`;
+      }
+    }
+
     if (Platform.OS === 'android') {
-      // L'émulateur Android accède à localhost de la machine hôte via 10.0.2.2
+      // Émulateur Android (fallback)
       return 'http://10.0.2.2:8080/api/v1';
     }
-    // iOS simulator ou web : localhost fonctionne directement
+
+    // iOS simulator / Web (fallback)
     return 'http://localhost:8080/api/v1';
   }
 
-  // 3. Fallback production (ne devrait pas arriver sans EXPO_PUBLIC_API_URL)
-  return 'http://localhost:8080/api/v1';
+  // 3. Fallback production / LAN
+  return 'http://192.168.100.132:8080/api/v1';
 }
 
 export const API_BASE_URL = resolveApiBaseUrl();

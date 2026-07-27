@@ -158,8 +158,14 @@ CREATE TABLE IF NOT EXISTS clients (
 );
 
 CREATE INDEX IF NOT EXISTS idx_clients_cabinet ON clients(cabinet_id) WHERE deleted_at IS NULL;
+-- Wrapper IMMUTABLE requis pour utiliser unaccent() dans un index GIN
+CREATE OR REPLACE FUNCTION unaccent_immutable(text)
+RETURNS text LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
+    SELECT unaccent($1);
+$$;
 -- Recherche insensible à la casse et aux accents sur le nom
-CREATE INDEX IF NOT EXISTS idx_clients_nom_trgm ON clients USING gin (unaccent(nom_complet) gin_trgm_ops)
+CREATE EXTENSION IF NOT EXISTS "pg_trgm";
+CREATE INDEX IF NOT EXISTS idx_clients_nom_trgm ON clients USING gin (unaccent_immutable(nom_complet) gin_trgm_ops)
     WHERE deleted_at IS NULL;
 
 COMMENT ON TABLE clients IS 'Clients du cabinet (personnes physiques ou morales).';
@@ -275,24 +281,19 @@ EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 -- ============================================================================
 INSERT INTO roles_acces (cabinet_id, libelle, permissions, est_role_systeme)
 VALUES
-    (NULL, 'Administrateur', ARRAY[
-        'dossier:lire:all', 'dossier:creer:all', 'dossier:modifier:all', 'dossier:cloturer:all',
-        'client:lire:all', 'client:creer:all', 'client:modifier:all',
-        'utilisateur:lire:all', 'utilisateur:creer:all', 'utilisateur:modifier:all',
-        'journal:lire:all'
-    ], TRUE),
+    (NULL, 'Administrateur', ARRAY['*:*:all'], TRUE),
     (NULL, 'Associe', ARRAY[
-        'dossier:lire:all', 'dossier:creer:all', 'dossier:modifier:all', 'dossier:cloturer:all',
-        'client:lire:all', 'client:creer:all', 'client:modifier:all',
-        'journal:lire:all'
+        'dossiers:read:all', 'dossiers:create:all', 'dossiers:update:all',
+        'clients:read:all', 'clients:create:all', 'clients:update:all',
+        'journal:read:all'
     ], TRUE),
     (NULL, 'Avocat', ARRAY[
-        'dossier:lire:assigned', 'dossier:creer:own', 'dossier:modifier:assigned',
-        'client:lire:assigned', 'client:creer:own'
+        'dossiers:read:assigned', 'dossiers:create:own', 'dossiers:update:assigned',
+        'clients:read:assigned', 'clients:create:own'
     ], TRUE),
     (NULL, 'Assistant', ARRAY[
-        'dossier:lire:assigned', 'dossier:modifier:assigned',
-        'client:lire:assigned'
+        'dossiers:read:assigned', 'dossiers:update:assigned',
+        'clients:read:assigned'
     ], TRUE)
 ON CONFLICT (cabinet_id, libelle) DO NOTHING;
 
@@ -325,8 +326,8 @@ DO $$
 DECLARE
     v_cabinet_id  BIGINT;
     v_role_id     BIGINT;
-    -- Hash argon2id de "Admin@2025!" — CHANGER EN PRODUCTION
-    v_pwd_hash    TEXT := '$argon2id$v=19$m=65536,t=3,p=4$PLACEHOLDER_REPLACE_WITH_REAL_HASH$PLACEHOLDER_REPLACE_WITH_REAL_HASH';
+    -- Hash argon2id de "Admin@2025!" — CHANGER EN PRODUCTION (voir scripts/seed-admin.js)
+    v_pwd_hash    TEXT := '$argon2id$v=19$m=65536,p=4,t=3$Mo2iJWSi435NqqQEvSKRBg$6q1rSjithmye3iSOUtj3CjnJt1Jqkf5eBW+pIpFsy14';
 BEGIN
     SELECT id INTO v_cabinet_id FROM cabinets WHERE nom = 'Cabinet Démonstration' LIMIT 1;
     SELECT id INTO v_role_id    FROM roles_acces WHERE libelle = 'Administrateur' AND est_role_systeme = TRUE LIMIT 1;

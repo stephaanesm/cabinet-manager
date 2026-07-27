@@ -1,31 +1,39 @@
 /**
  * src/lib/secureStorage.ts
- * Abstraction autour d'expo-secure-store pour le stockage
- * sécurisé des tokens JWT et des métadonnées de session.
+ * Stockage persistant des tokens JWT et métadonnées de session.
+ *
+ * Utilise @react-native-async-storage/async-storage — compatible New
+ * Architecture sans dépendance JSI fragile.
+ *
+ * Note de sécurité : AsyncStorage n'est pas chiffré sur Android.
+ * Pour une app de production sensible, migrer vers expo-secure-store
+ * une fois que le bug JSI / New Architecture est corrigé dans une version
+ * ultérieure d'Expo SDK. Les tokens JWT ont une durée de vie courte (14 min)
+ * ce qui limite l'exposition en cas de compromission du stockage.
  */
 
-import * as SecureStore from 'expo-secure-store';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const KEYS = {
-  ACCESS_TOKEN: 'cabinet_access_token',
+  ACCESS_TOKEN:  'cabinet_access_token',
   REFRESH_TOKEN: 'cabinet_refresh_token',
-  DEVICE_ID: 'cabinet_device_id',
-  USER: 'cabinet_user',
+  DEVICE_ID:     'cabinet_device_id',
+  USER:          'cabinet_user',
 } as const;
 
 async function set(key: string, value: string): Promise<void> {
-  await SecureStore.setItemAsync(key, value);
+  await AsyncStorage.setItem(key, value);
 }
 
 async function get(key: string): Promise<string | null> {
-  return SecureStore.getItemAsync(key);
+  return AsyncStorage.getItem(key);
 }
 
 async function remove(key: string): Promise<void> {
-  await SecureStore.deleteItemAsync(key);
+  await AsyncStorage.removeItem(key);
 }
 
-// ── Tokens ──────────────────────────────────────────────────────────────────
+// ── Tokens ───────────────────────────────────────────────────────────────────
 
 export async function saveTokens(access: string, refresh: string): Promise<void> {
   await Promise.all([set(KEYS.ACCESS_TOKEN, access), set(KEYS.REFRESH_TOKEN, refresh)]);
@@ -43,14 +51,11 @@ export async function clearTokens(): Promise<void> {
   await Promise.all([remove(KEYS.ACCESS_TOKEN), remove(KEYS.REFRESH_TOKEN)]);
 }
 
-// ── Identifiant appareil ─────────────────────────────────────────────────────
-// Généré une seule fois et persisté. Permet au backend de tracer les
-// refresh tokens par appareil et de les révoquer individuellement.
+// ── Identifiant appareil ──────────────────────────────────────────────────────
 
 export async function getOrCreateDeviceId(): Promise<string> {
   let id = await get(KEYS.DEVICE_ID);
   if (!id) {
-    // UUID v4 simple sans dépendance externe
     id = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
       const r = (Math.random() * 16) | 0;
       const v = c === 'x' ? r : (r & 0x3) | 0x8;
@@ -61,7 +66,7 @@ export async function getOrCreateDeviceId(): Promise<string> {
   return id;
 }
 
-// ── Profil utilisateur en cache ──────────────────────────────────────────────
+// ── Profil utilisateur en cache ───────────────────────────────────────────────
 
 export async function saveUser(user: object): Promise<void> {
   await set(KEYS.USER, JSON.stringify(user));

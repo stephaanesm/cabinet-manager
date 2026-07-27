@@ -19,6 +19,7 @@ import api, {
 import {
     clearAll,
     getAccessToken,
+    getRefreshToken,
     getSavedUser,
     saveTokens,
     saveUser
@@ -130,14 +131,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (isLoading) return;
 
     const inAuthGroup = segments[0] === '(tabs)';
+    const inAdminGroup = segments[0] === 'admin';
     const onLogin = segments[0] === 'login' || segments[0] === undefined || segments[0] === 'index';
 
-    if (!user && inAuthGroup) {
+    if (!user && (inAuthGroup || inAdminGroup)) {
       hasNavigated.current = true;
       router.replace('/login');
     } else if (user && onLogin && !hasNavigated.current) {
       hasNavigated.current = true;
-      router.replace('/(tabs)');
+      if (user.role === 'Administrateur') {
+        router.replace('/admin' as any);
+      } else {
+        router.replace('/(tabs)');
+      }
     }
   }, [user, isLoading, segments, router]);
 

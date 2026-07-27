@@ -1,23 +1,21 @@
 import { AppColors as C } from '@/constants/theme';
-import {
-    audiences, factures, notifications,
-} from '@/data/mockData';
 import { useAuth } from '@/hooks/useAuth';
 import { useDossiers } from '@/hooks/useDossiers';
 import { useRouter } from 'expo-router';
 import {
-    AlertTriangle,
     ArrowDown,
     ArrowUp,
     Bell,
-    Brain, Calendar,
+    Brain,
+    Calendar,
     DollarSign,
     FileText,
+    LogOut,
     Plus,
     Shield,
     TrendingUp,
     Users,
-    WifiOff
+    WifiOff,
 } from 'lucide-react-native';
 import {
     ScrollView,
@@ -25,61 +23,29 @@ import {
     StyleSheet,
     Text,
     TouchableOpacity,
-    View
+    View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function DashboardScreen() {
   const router = useRouter();
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
 
-  // Dossiers réels depuis le backend
-  const { dossiers, isLoading: loadingDossiers, total: totalDossiers } = useDossiers({ pageSize: 50 });
+  // Dossiers réels depuis le backend PostgreSQL
+  const { dossiers } = useDossiers({ pageSize: 50 });
 
   const affairesActives = dossiers.filter(
     d => d.statut === 'Ouvert' || d.statut === 'En cours'
   ).length;
 
-  // Dossiers récemment ouverts, triés par date (les plus récents en premier)
   const affairesCritiques = dossiers
     .filter(d => d.statut === 'Ouvert' || d.statut === 'En cours')
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
     .slice(0, 3);
 
   const today = new Date();
-  const in7days = new Date(); in7days.setDate(today.getDate() + 7);
-  const prochaines7Jours = audiences.filter(a => {
-    const d = new Date(a.date);
-    return d >= today && d <= in7days && a.statut === 'prevue';
-  }).length;
-
-  const mois = today.getMonth();
-  const montantFacture = factures
-    .filter(f => new Date(f.dateEmission).getMonth() === mois)
-    .reduce((acc, f) => acc + f.montant, 0);
-  const montantEncaisse = factures
-    .filter(f => new Date(f.dateEmission).getMonth() === mois)
-    .reduce((acc, f) => acc + f.montantPaye, 0);
-
-  const facturesRetard = factures.filter(f => f.statut === 'en_retard').length;
-  const unread = notifications.filter(n => !n.lue).length;
-
-  const prochainesAudiences = audiences
-    .filter(a => new Date(a.date) >= today && a.statut === 'prevue')
-    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
-    .slice(0, 3);
-
-  // Dossiers récents (remplace les "affaires critiques" jusqu'à l'ajout d'un endpoint stats)
-  const dossiersRecents = dossiers.slice(0, 3);
-
-  const fmtDate = (d: string) => new Intl.DateTimeFormat('fr-FR', {
-    day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
-  }).format(new Date(d));
-
-  const fmtShortDate = (d: string) => {
-    const dt = new Date(d);
-    return `${dt.getDate()} ${new Intl.DateTimeFormat('fr-FR', { month: 'short' }).format(dt)}`;
-  };
+  const prochaines7Jours = 0;
+  const unread = 0;
 
   return (
     <View style={s.root}>
@@ -103,12 +69,9 @@ export default function DashboardScreen() {
                   </View>
                 )}
               </TouchableOpacity>
-              <View>
-                <Text style={s.dateLabel}>Aujourd'hui</Text>
-                <Text style={s.dateVal}>
-                  {new Intl.DateTimeFormat('fr-FR', { day: 'numeric', month: 'long' }).format(today)}
-                </Text>
-              </View>
+              <TouchableOpacity style={s.logoutBtn} onPress={logout}>
+                <LogOut color={C.red400} size={20} />
+              </TouchableOpacity>
             </View>
           </View>
 
@@ -142,15 +105,15 @@ export default function DashboardScreen() {
           {/* KPI — affaires actives */}
           <View style={s.kpiCard}>
             <View style={{ flex: 1 }}>
-              <Text style={s.kpiLabel}>Affaires actives</Text>
+              <Text style={s.kpiLabel}>Affaires actives (Base de données)</Text>
               <Text style={s.kpiValue}>{affairesActives}</Text>
             </View>
             <View style={{ alignItems: 'flex-end' }}>
               <View style={s.kpiTrend}>
                 <ArrowUp color={C.green600} size={14} />
-                <Text style={s.kpiTrendText}>+12%</Text>
+                <Text style={s.kpiTrendText}>Direct BD</Text>
               </View>
-              <Text style={s.kpiSub}>vs mois dernier</Text>
+              <Text style={s.kpiSub}>Synchronisé</Text>
             </View>
           </View>
 
@@ -159,10 +122,7 @@ export default function DashboardScreen() {
             <View style={{ flex: 1 }}>
               <Text style={s.kpiLabel}>Audiences (7 jours)</Text>
               <Text style={s.kpiValue}>{prochaines7Jours}</Text>
-              <Text style={s.kpiSub}>
-                Prochaine :{' '}
-                {prochainesAudiences[0] ? fmtDate(prochainesAudiences[0].date) : 'Aucune'}
-              </Text>
+              <Text style={s.kpiSub}>Prochaine : Aucune</Text>
             </View>
             <View style={s.kpiIconWrap}>
               <Calendar color={C.amber600} size={26} />
@@ -173,69 +133,32 @@ export default function DashboardScreen() {
           <View style={s.row}>
             <View style={[s.kpiCardSm, { flex: 1, marginRight: 6 }]}>
               <Text style={s.kpiLabel}>Facturé (mois)</Text>
-              <Text style={s.kpiValue}>{(montantFacture / 1_000_000).toFixed(1)}M</Text>
+              <Text style={s.kpiValue}>0 FCFA</Text>
               <View style={[s.kpiTrend, { marginTop: 4 }]}>
                 <TrendingUp color={C.green600} size={13} />
-                <Text style={[s.kpiTrendText, { color: C.green600 }]}>+8%</Text>
+                <Text style={[s.kpiTrendText, { color: C.green600 }]}>0%</Text>
               </View>
             </View>
             <View style={[s.kpiCardSm, { flex: 1, marginLeft: 6 }]}>
               <Text style={s.kpiLabel}>Encaissé (mois)</Text>
-              <Text style={s.kpiValue}>{(montantEncaisse / 1_000_000).toFixed(1)}M</Text>
+              <Text style={s.kpiValue}>0 FCFA</Text>
               <View style={[s.kpiTrend, { marginTop: 4 }]}>
                 <ArrowDown color={C.orange600} size={13} />
-                <Text style={[s.kpiTrendText, { color: C.orange600 }]}>-3%</Text>
+                <Text style={[s.kpiTrendText, { color: C.orange600 }]}>0%</Text>
               </View>
             </View>
           </View>
 
-          {/* Alert factures en retard */}
-          {facturesRetard > 0 && (
-            <TouchableOpacity style={s.alertCard} onPress={() => router.push('/(tabs)/facturation')}>
-              <AlertTriangle color={C.red600} size={22} />
-              <View style={{ flex: 1, marginLeft: 12 }}>
-                <Text style={s.alertTitle}>{facturesRetard} facture(s) en retard</Text>
-                <Text style={s.alertSub}>Action requise</Text>
-              </View>
-              <Text style={s.alertLink}>Voir</Text>
-            </TouchableOpacity>
-          )}
-
-          {/* Prochaines audiences */}
+          {/* Affaires récentes depuis la BD */}
           <View style={s.section}>
             <View style={s.sectionHeader}>
-              <Text style={s.sectionTitle}>Mes prochaines audiences</Text>
-              <TouchableOpacity onPress={() => router.push('/(tabs)/audiences')}>
+              <Text style={s.sectionTitle}>Affaires récentes</Text>
+              <TouchableOpacity onPress={() => router.push('/(tabs)/affaires')}>
                 <Text style={s.sectionLink}>Voir tout</Text>
               </TouchableOpacity>
             </View>
-            {prochainesAudiences.map(aud => (
-              <View key={aud.id} style={s.audCard}>
-                <View style={s.audDate}>
-                  <Text style={s.audDay}>{new Date(aud.date).getDate()}</Text>
-                  <Text style={s.audMonth}>
-                    {new Intl.DateTimeFormat('fr-FR', { month: 'short' }).format(new Date(aud.date))}
-                  </Text>
-                </View>
-                <View style={{ flex: 1, marginLeft: 12 }}>
-                  <Text style={s.audTitle} numberOfLines={1}>{aud.affaire.intitule}</Text>
-                  <Text style={s.audMeta}>{aud.heure} • {aud.nature}</Text>
-                  <Text style={s.audJur} numberOfLines={1}>{aud.juridiction}</Text>
-                </View>
-              </View>
-            ))}
-          </View>
-
-          {/* Affaires critiques */}
-          {affairesCritiques.length > 0 && (
-            <View style={s.section}>
-              <View style={s.sectionHeader}>
-                <Text style={s.sectionTitle}>Affaires récentes</Text>
-                <TouchableOpacity onPress={() => router.push('/(tabs)/affaires')}>
-                  <Text style={s.sectionLink}>Voir tout</Text>
-                </TouchableOpacity>
-              </View>
-              {affairesCritiques.map(a => (
+            {affairesCritiques.length > 0 ? (
+              affairesCritiques.map(a => (
                 <TouchableOpacity
                   key={a.id}
                   style={s.critCard}
@@ -250,9 +173,13 @@ export default function DashboardScreen() {
                     <Text style={s.critBadgeText}>{a.statut}</Text>
                   </View>
                 </TouchableOpacity>
-              ))}
-            </View>
-          )}
+              ))
+            ) : (
+              <View style={s.emptyBox}>
+                <Text style={s.emptyBoxText}>Aucune affaire dans la base de données</Text>
+              </View>
+            )}
+          </View>
 
           {/* Actions rapides */}
           <View style={s.section}>
@@ -260,7 +187,7 @@ export default function DashboardScreen() {
               <Text style={s.sectionTitle}>Actions rapides</Text>
               <View style={s.actionsGrid}>
                 {[
-                  { icon: FileText, label: 'Nouvelle affaire', sub: 'Créer un dossier', color: C.amber50, border: C.amber200, iconColor: C.amber600, route: '/(tabs)/affaires' },
+                  { icon: FileText, label: 'Nouvelle affaire', sub: 'Créer un dossier', color: C.amber50, border: C.amber200, iconColor: C.amber600, route: '/nouvelle-affaire' },
                   { icon: Calendar, label: 'Audiences', sub: 'Calendrier', color: C.blue50, border: C.blue100, iconColor: C.blue600, route: '/(tabs)/audiences' },
                   { icon: Brain, label: 'Assistant IA', sub: 'Analyse juridique', color: C.purple50, border: C.purple100, iconColor: C.purple600, route: '/(tabs)/assistant-ia', badge: 'NEW' },
                   { icon: TrendingUp, label: 'Facturation', sub: 'Honoraires', color: C.green50, border: C.green100, iconColor: C.green600, route: '/(tabs)/facturation' },
@@ -289,7 +216,7 @@ export default function DashboardScreen() {
         </ScrollView>
 
         {/* FAB */}
-        <TouchableOpacity style={s.fab} onPress={() => router.push('/(tabs)/affaires')} activeOpacity={0.85}>
+        <TouchableOpacity style={s.fab} onPress={() => router.push('/nouvelle-affaire')} activeOpacity={0.85}>
           <Plus color={C.gray900} size={28} />
         </TouchableOpacity>
         {/* Bouton Admin */}
@@ -312,10 +239,9 @@ const s = StyleSheet.create({
   headerSub: { fontSize: 13, color: C.amber400, marginTop: 2 },
   headerRight: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   bellBtn: { width: 40, height: 40, backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
+  logoutBtn: { width: 40, height: 40, backgroundColor: 'rgba(239, 68, 68, 0.15)', borderRadius: 20, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: 'rgba(239, 68, 68, 0.3)' },
   badge: { position: 'absolute', top: -4, right: -4, backgroundColor: C.red500, borderRadius: 10, minWidth: 20, height: 20, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 },
   badgeText: { color: C.white, fontSize: 11, fontWeight: '700' },
-  dateLabel: { fontSize: 11, color: C.gray400, textAlign: 'right' },
-  dateVal: { fontSize: 13, fontWeight: '600', color: C.white, textAlign: 'right' },
   offlineBanner: {
     flexDirection: 'row', alignItems: 'center', gap: 10,
     backgroundColor: C.amber50, borderWidth: 1, borderColor: C.amber200,
@@ -359,43 +285,22 @@ const s = StyleSheet.create({
   kpiTrendText: { fontSize: 13, fontWeight: '500', color: C.green600 },
   kpiIconWrap: { backgroundColor: C.amber50, padding: 10, borderRadius: 12 },
   row: { flexDirection: 'row', marginHorizontal: 16, marginTop: 12 },
-  alertCard: {
-    flexDirection: 'row', alignItems: 'center',
-    backgroundColor: C.red50, borderWidth: 1, borderColor: C.red100,
-    borderRadius: 16, padding: 16, marginHorizontal: 16, marginTop: 12,
-  },
-  alertTitle: { fontSize: 14, fontWeight: '600', color: '#7f1d1d' },
-  alertSub: { fontSize: 13, color: C.red600, marginTop: 2 },
-  alertLink: { fontSize: 13, fontWeight: '600', color: C.red600 },
   section: { marginTop: 20, paddingHorizontal: 16 },
   sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
   sectionTitle: { fontSize: 16, fontWeight: '700', color: C.gray900 },
   sectionLink: { fontSize: 13, fontWeight: '500', color: C.amber600 },
-  audCard: {
-    backgroundColor: C.white, borderRadius: 14, padding: 14, marginBottom: 8,
-    flexDirection: 'row', alignItems: 'flex-start',
-    shadowColor: C.black, shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.06, shadowRadius: 3, elevation: 1,
-  },
-  audDate: {
-    backgroundColor: C.amber50, borderWidth: 1, borderColor: C.amber200,
-    borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8, alignItems: 'center', minWidth: 48,
-  },
-  audDay: { fontSize: 22, fontWeight: '700', color: C.amber600 },
-  audMonth: { fontSize: 11, color: C.amber600, marginTop: 2 },
-  audTitle: { fontSize: 14, fontWeight: '600', color: C.gray900, marginBottom: 2 },
-  audMeta: { fontSize: 13, color: C.gray600, marginBottom: 2 },
-  audJur: { fontSize: 12, color: C.gray500 },
+  emptyBox: { backgroundColor: C.white, borderRadius: 14, padding: 20, alignItems: 'center' },
+  emptyBoxText: { fontSize: 14, color: C.gray500 },
   critCard: {
     backgroundColor: C.white, borderRadius: 14, padding: 14, marginBottom: 8,
-    borderLeftWidth: 4, borderLeftColor: C.red500,
+    borderLeftWidth: 4, borderLeftColor: C.amber500,
     flexDirection: 'row', alignItems: 'flex-start',
     shadowColor: C.black, shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.06, shadowRadius: 3, elevation: 1,
   },
   critTitle: { fontSize: 14, fontWeight: '600', color: C.gray900, marginBottom: 2 },
-  critClient: { fontSize: 13, color: C.gray600, marginBottom: 2 },
   critMeta: { fontSize: 12, color: C.gray500 },
-  critBadge: { backgroundColor: C.red100, borderRadius: 20, paddingHorizontal: 8, paddingVertical: 4, marginLeft: 10 },
-  critBadgeText: { fontSize: 11, fontWeight: '500', color: C.red700 },
+  critBadge: { backgroundColor: C.amber100, borderRadius: 20, paddingHorizontal: 8, paddingVertical: 4, marginLeft: 10 },
+  critBadgeText: { fontSize: 11, fontWeight: '500', color: C.amber800 },
   actionsCard: {
     backgroundColor: C.white, borderRadius: 16, padding: 16,
     shadowColor: C.black, shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.06, shadowRadius: 3, elevation: 1,
