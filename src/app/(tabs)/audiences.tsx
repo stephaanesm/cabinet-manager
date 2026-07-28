@@ -1,163 +1,358 @@
+/**
+ * src/app/(tabs)/audiences.tsx
+ * Écran principal : CALENDRIER HEBDOMADAIRE (Scrollable)
+ *
+ * Fonctionnalités :
+ * 1. Vue calendrier hebdomadaire scrollable (Semaine courante, précédente, suivante, retour "Aujourd'hui").
+ * 2. Sélection d'une date pour voir les événements / audiences du jour.
+ * 3. Code Couleur Strict :
+ *    - AUDIENCES = JAUNE (Amber/Yellow)
+ *    - ÉVÉNEMENTS IMPORTANTS = JAUNE (Amber/Yellow)
+ *    - RDV Client = Bleu, RDV Associé = Violet, Réunion = Indigo, Convocation = Vert
+ * 4. Création d'événements (Audience, RDV Client, RDV Associé, Réunion, Convocation) avec liaison Dossier.
+ * 5. Synchronisation automatique avec les audiences créées dans les dossiers.
+ */
+
 import { AppColors as C } from '@/constants/theme';
 import { useAudiences } from '@/hooks/useAudiences';
-import { Audience, AudienceStatut } from '@/services/audiences.service';
+import { useDossiers } from '@/hooks/useDossiers';
+import { extractErrorMessage } from '@/lib/api';
+import { Audience } from '@/services/audiences.service';
 import { useRouter } from 'expo-router';
-import { AlertCircle, Calendar, ChevronRight, MapPin, Plus } from 'lucide-react-native';
-import { useCallback, useState } from 'react';
 import {
-    ActivityIndicator, FlatList, RefreshControl,
-    ScrollView, StyleSheet, Text, TouchableOpacity, View,
+  AlertCircle, Briefcase, Calendar, ChevronLeft, ChevronRight,
+  Clock, MapPin, Plus, Star, Users, X,
+} from 'lucide-react-native';
+import { useCallback, useMemo, useState } from 'react';
+import {
+  ActivityIndicator, Alert, FlatList, Modal, RefreshControl,
+  ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-type AudFilter = 'all' | AudienceStatut;
+type EventCategory = 'Audience' | 'RDV Client' | 'RDV Associé' | 'Réunion' | 'Convocation';
 
-const STATUT_COLORS: Record<AudienceStatut, { bg: string; text: string }> = {
-  prevue:   { bg: C.blue100,   text: C.blue700 },
-  tenue:    { bg: C.green100,  text: C.green700 },
-  renvoyee: { bg: C.orange100, text: C.orange700 },
-};
-const STATUT_LABELS: Record<AudienceStatut, string> = {
-  prevue: 'Prévue', tenue: 'Tenue', renvoyee: 'Renvoyée',
-};
+const CATEGORIES: { id: EventCategory; label: string; icon: string }[] = [
+  { id: 'Audience',     label: 'Audience',      icon: '⚖️' },
+  { id: 'RDV Client',   label: 'RDV Client',    icon: '👤' },
+  { id: 'RDV Associé',  label: 'RDV Associé',   icon: '🤝' },
+  { id: 'Réunion',      label: 'Réunion',       icon: '💼' },
+  { id: 'Convocation',  label: 'Convocation',   icon: '📜' },
+];
 
-const fmt = (d: string) =>
-  new Intl.DateTimeFormat('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(d));
-const fmtMon = (d: Date) =>
-  new Intl.DateTimeFormat('fr-FR', { month: 'short' }).format(d);
+// Helper formats de date
+const toYYYYMMDD = (d: Date) => d.toISOString().slice(0, 10);
 
-export default function AudiencesScreen() {
+const DAYS_FR = ['Dim', 'Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam'];
+const MONTHS_FR = ['Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin', 'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'];
+
+export default function CalendrierScreen() {
   const router = useRouter();
-  const [filter, setFilter] = useState<AudFilter>('all');
 
-  const { audiences, isLoading, error, total, refetch } = useAudiences({
-    statut: filter !== 'all' ? filter : undefined,
-  });
+  // Date actuellement sélectionnée (par défaut aujourd'hui)
+  const todayDate = useMemo(() => new Date(), []);
+  const [selectedDate, setSelectedDate] = useState<Date>(todayDate);
+  const [weekOffset, setWeekOffset]     = useState<number>(0);
 
-  const today = new Date();
-  const upcoming = audiences.filter(
-    a => new Date(a.dateAudience) >= today && a.statut === 'prevue'
-  ).length;
+  // Modal d'ajout d'événement / audience
+  const [showAddModal, setShowAddModal]   = useState(false);
+  const [evtCategory, setEvtCategory]     = useState<EventCategory>('Audience');
+  const [evtDateStr, setEvtDateStr]       = useState(toYYYYMMDD(todayDate));
+  const [evtHeure, setEvtHeure]           = useState('09:00');
+  const [evtTitre, setEvtTitre]           = useState('');
+  const [evtDossierId, setEvtDossierId]   = useState<number | undefined>(undefined);
+  const [evtLieu, setEvtLieu]             = useState('');
+  const [evtNotes, setEvtNotes]           = useState('');
+  const [evtImportant, setEvtImportant]   = useState(false);
+  const [savingEvt, setSavingEvt]         = useState(false);
 
-  const isToday    = (d: string) => today.toDateString() === new Date(d).toDateString();
-  const isTomorrow = (d: string) => {
-    const t = new Date(); t.setDate(today.getDate() + 1);
-    return t.toDateString() === new Date(d).toDateString();
+  // Chargement des audiences & des dossiers
+  const { audiences, isLoading, error, refetch, create: createAudience } = useAudiences({ lazy: false });
+  const { dossiers } = useDossiers({ pageSize: 50 });
+
+  // ── Calcul des 7 jours de la semaine affichée ─────────────────────────────
+  const weekDays = useMemo(() => {
+    const base = new Date();
+    base.setDate(base.getDate() + weekOffset * 7);
+
+    // Trouver le Lundi de cette semaine (1 = Lundi, 0 = Dimanche)
+    const dayOfWeek = base.getDay();
+    const distanceToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+
+    const monday = new Date(base);
+    monday.setDate(base.getDate() + distanceToMonday);
+
+    const days: Date[] = [];
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(monday);
+      d.setDate(monday.getDate() + i);
+      days.push(d);
+    }
+    return days;
+  }, [weekOffset]);
+
+  // Mois & Année affichés en haut de semaine
+  const weekMonthYearLabel = useMemo(() => {
+    if (weekDays.length === 0) return '';
+    const first = weekDays[0];
+    const last = weekDays[6];
+    if (first.getMonth() === last.getMonth()) {
+      return `${MONTHS_FR[first.getMonth()]} ${first.getFullYear()}`;
+    }
+    return `${MONTHS_FR[first.getMonth()]} - ${MONTHS_FR[last.getMonth()]} ${last.getFullYear()}`;
+  }, [weekDays]);
+
+  // Filtrage des événements pour la date sélectionnée
+  const selectedDateStr = toYYYYMMDD(selectedDate);
+
+  const eventsOnSelectedDate = useMemo(() => {
+    return audiences.filter(a => {
+      const aDateStr = new Date(a.dateAudience).toISOString().slice(0, 10);
+      return aDateStr === selectedDateStr;
+    }).sort((a, b) => (a.heure || '').localeCompare(b.heure || ''));
+  }, [audiences, selectedDateStr]);
+
+  // Map des dates ayant au moins un événement (pour les puces du calendrier)
+  const eventsCountPerDate = useMemo(() => {
+    const map: Record<string, number> = {};
+    audiences.forEach(a => {
+      const dStr = new Date(a.dateAudience).toISOString().slice(0, 10);
+      map[dStr] = (map[dStr] || 0) + 1;
+    });
+    return map;
+  }, [audiences]);
+
+  // ── Handlers de création d'événement / audience ────────────────────────────
+
+  const handleOpenAddModal = (initialDate?: Date) => {
+    const d = initialDate || selectedDate;
+    setEvtDateStr(toYYYYMMDD(d));
+    setEvtHeure('09:00');
+    setEvtCategory('Audience');
+    setEvtTitre('');
+    setEvtDossierId(dossiers[0]?.id ? Number(dossiers[0].id) : undefined);
+    setEvtLieu('');
+    setEvtNotes('');
+    setEvtImportant(true); // Les audiences sont d'office des événements importants
+    setShowAddModal(true);
   };
 
-  const counts: Record<AudienceStatut, number> = {
-    prevue:   audiences.filter(a => a.statut === 'prevue').length,
-    tenue:    audiences.filter(a => a.statut === 'tenue').length,
-    renvoyee: audiences.filter(a => a.statut === 'renvoyee').length,
+  const handleSaveEvent = async () => {
+    if (!evtDateStr) {
+      Alert.alert('Erreur', 'La date de l\'événement est obligatoire.');
+      return;
+    }
+    const finalDossierId = Number(evtDossierId ?? dossiers[0]?.id ?? 1);
+
+    setSavingEvt(true);
+    try {
+      // Les audiences sont d'office des événements importants
+      const isImportantFinal = evtImportant || evtCategory === 'Audience';
+
+      let notesCombined = evtNotes.trim();
+      if (isImportantFinal) {
+        notesCombined = `[IMPORTANT] ${notesCombined}`;
+      }
+
+      const typeFinal = evtTitre.trim()
+        ? `${evtCategory}: ${evtTitre.trim()}`
+        : evtCategory;
+
+      // Format ISO 8601 valide pour dateAudience
+      const formattedDate = new Date(`${evtDateStr}T${evtHeure || '09:00'}:00.000Z`).toISOString();
+
+      await createAudience({
+        dossierId: finalDossierId,
+        dateAudience: formattedDate,
+        heure: evtHeure || '09:00',
+        typeAudience: typeFinal,
+        juridiction: evtLieu.trim() || undefined,
+        notes: notesCombined || undefined,
+        statut: 'prevue',
+      });
+
+      setShowAddModal(false);
+      refetch();
+      Alert.alert('Succès', 'Événement ajouté au calendrier.');
+    } catch (e) {
+      Alert.alert('Erreur', extractErrorMessage(e));
+    } finally {
+      setSavingEvt(false);
+    }
   };
 
-  const renderItem = useCallback(({ item: a }: { item: Audience }) => {
-    const d       = new Date(a.dateAudience);
-    const isPast  = d < today;
-    const todayFlag    = isToday(a.dateAudience);
-    const tomorrowFlag = isTomorrow(a.dateAudience);
-    const sc      = STATUT_COLORS[a.statut];
+  // ── Rendu d'une carte d'événement ─────────────────────────────────────────
+
+  const renderEventItem = useCallback(({ item: a }: { item: Audience }) => {
+    const isAudience = (a.typeAudience || '').toLowerCase().includes('audience') || !a.typeAudience;
+    const isImportant = (a.notes || '').includes('[IMPORTANT]');
+    const cleanNotes = (a.notes || '').replace('[IMPORTANT]', '').trim();
+
+    // Règle de couleur stricte : Audiences ET Événements Importants en JAUNE (Amber)
+    const isYellow = isAudience || isImportant;
+
+    let badgeBg: string = C.blue100;
+    let badgeText: string = C.blue700;
+    let categoryLabel = a.typeAudience || 'Événement';
+
+    if (isYellow) {
+      badgeBg = C.amber100;
+      badgeText = C.amber900;
+    } else if (categoryLabel.includes('RDV Client')) {
+      badgeBg = C.blue100; badgeText = C.blue700;
+    } else if (categoryLabel.includes('RDV Associé')) {
+      badgeBg = C.purple100; badgeText = C.purple600;
+    } else if (categoryLabel.includes('Réunion')) {
+      badgeBg = C.indigo100; badgeText = C.indigo600;
+    } else if (categoryLabel.includes('Convocation')) {
+      badgeBg = C.green100; badgeText = C.green700;
+    }
 
     return (
       <TouchableOpacity
-        style={[s.card, todayFlag && s.cardToday]}
-        onPress={() => router.push({ pathname: '/affaire/[id]', params: { id: a.dossierId } })}
+        style={[
+          s.card,
+          isYellow && s.cardYellow,
+        ]}
+        onPress={() => {
+          if (a.dossierId) {
+            router.push({ pathname: '/affaire/[id]', params: { id: a.dossierId } });
+          }
+        }}
         activeOpacity={0.8}
       >
-        <View style={{ flexDirection: 'row', gap: 12 }}>
-          {/* Date box */}
-          <View style={[
-            s.datebox,
-            todayFlag ? s.dateboxToday : isPast ? s.dateboxPast : s.dateboxFuture,
-          ]}>
-            <Text style={[s.dateDay, todayFlag ? { color: C.white } : isPast ? { color: C.gray600 } : { color: C.blue600 }]}>
-              {d.getDate()}
-            </Text>
-            <Text style={[s.dateMon, todayFlag ? { color: C.white } : isPast ? { color: C.gray500 } : { color: C.blue600 }]}>
-              {fmtMon(d)}
+        <View style={{ flexDirection: 'row', gap: 12, alignItems: 'flex-start' }}>
+          {/* Box Heure */}
+          <View style={[s.timeBox, isYellow && s.timeBoxYellow]}>
+            <Clock color={isYellow ? C.amber900 : C.blue700} size={14} />
+            <Text style={[s.timeText, isYellow && s.timeTextYellow]}>
+              {a.heure || '09:00'}
             </Text>
           </View>
 
-          {/* Content */}
+          {/* Contenu */}
           <View style={{ flex: 1 }}>
-            {todayFlag    && <View style={s.todayBadge}><Text style={s.todayText}>AUJOURD'HUI</Text></View>}
-            {tomorrowFlag && <View style={s.tomorrowBadge}><Text style={s.tomorrowText}>DEMAIN</Text></View>}
-
-            {a.typeAudience && <Text style={s.affTitle} numberOfLines={1}>{a.typeAudience}</Text>}
-            <Text style={s.meta}>
-              {a.heure ? `${a.heure} • ` : ''}Dossier #{a.dossierId}
-            </Text>
-            {a.juridiction && (
-              <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 4, marginTop: 2 }}>
-                <MapPin color={C.gray500} size={12} style={{ marginTop: 1 }} />
-                <Text style={s.jur} numberOfLines={2}>{a.juridiction}</Text>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+              <View style={[s.catBadge, { backgroundColor: badgeBg }]}>
+                <Text style={[s.catBadgeText, { color: badgeText }]}>{categoryLabel}</Text>
               </View>
-            )}
-
-            <View style={{ flexDirection: 'row', marginTop: 8, justifyContent: 'space-between', alignItems: 'center' }}>
-              <View style={[s.statusBadge, { backgroundColor: sc.bg }]}>
-                <Text style={[s.statusText, { color: sc.text }]}>{STATUT_LABELS[a.statut]}</Text>
-              </View>
-              <ChevronRight color={C.gray400} size={18} />
+              {isImportant && (
+                <View style={s.importantPill}>
+                  <Star color={C.amber900} size={10} fill={C.amber900} />
+                  <Text style={s.importantPillText}>IMPORTANT</Text>
+                </View>
+              )}
             </View>
 
-            {a.notes && (
-              <View style={s.noteBanner}>
-                <Text style={s.noteText}>📌 {a.notes}</Text>
+            {a.dossierId && (
+              <Text style={s.evtDossierRef}>Dossier #{a.dossierId}</Text>
+            )}
+
+            {a.juridiction && (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 3 }}>
+                <MapPin color={C.gray500} size={12} />
+                <Text style={s.evtLieu} numberOfLines={1}>{a.juridiction}</Text>
               </View>
             )}
+
+            {cleanNotes ? (
+              <View style={[s.notesBox, isYellow && s.notesBoxYellow]}>
+                <Text style={s.notesContent} numberOfLines={2}>{cleanNotes}</Text>
+              </View>
+            ) : null}
           </View>
         </View>
       </TouchableOpacity>
     );
-  }, [router, today]);
+  }, [router]);
 
   return (
     <View style={s.root}>
       <SafeAreaView edges={['top']} style={{ backgroundColor: C.gray900 }}>
-        {/* Header */}
+
+        {/* ── En-tête Principal ── */}
         <View style={s.header}>
-          <Text style={s.title}>Audiences</Text>
-          <Text style={s.sub}>
-            {isLoading ? 'Chargement…' : `${total} audience${total !== 1 ? 's' : ''} au total`}
-          </Text>
-        </View>
-
-        {/* Stat card */}
-        <View style={s.statCard}>
           <View>
-            <Text style={s.statLabel}>À venir</Text>
-            <Text style={s.statVal}>{upcoming}</Text>
+            <Text style={s.title}>Calendrier</Text>
+            <Text style={s.sub}>{weekMonthYearLabel}</Text>
           </View>
-          <Calendar color={C.gray900} size={32} />
+          <TouchableOpacity style={s.addHeaderBtn} onPress={() => handleOpenAddModal()} activeOpacity={0.8}>
+            <Plus color={C.gray900} size={18} />
+            <Text style={s.addHeaderBtnText}>Ajouter</Text>
+          </TouchableOpacity>
         </View>
 
-        {/* Filters */}
+        {/* ── Barre de Navigation Semaine ── */}
+        <View style={s.weekNavRow}>
+          <TouchableOpacity style={s.navArrowBtn} onPress={() => setWeekOffset(w => w - 1)}>
+            <ChevronLeft color={C.amber400} size={20} />
+          </TouchableOpacity>
+
+          <TouchableOpacity style={s.todayBtn} onPress={() => { setWeekOffset(0); setSelectedDate(todayDate); }}>
+            <Calendar color={C.amber400} size={14} />
+            <Text style={s.todayBtnText}>Aujourd'hui</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={s.navArrowBtn} onPress={() => setWeekOffset(w => w + 1)}>
+            <ChevronRight color={C.amber400} size={20} />
+          </TouchableOpacity>
+        </View>
+
+        {/* ── Calendrier Hebdomadaire Scrollable (7 Jours) ── */}
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
-          style={{ marginBottom: 8 }}
-          contentContainerStyle={s.filtersContent}
+          contentContainerStyle={s.weekStripContainer}
         >
-          {([
-            { key: 'all',      label: `Toutes (${total})` },
-            { key: 'prevue',   label: `Prévues (${counts.prevue})` },
-            { key: 'tenue',    label: `Tenues (${counts.tenue})` },
-            { key: 'renvoyee', label: `Renvoyées (${counts.renvoyee})` },
-          ] as { key: AudFilter; label: string }[]).map(({ key, label }) => (
-            <TouchableOpacity
-              key={key}
-              onPress={() => setFilter(key)}
-              style={[s.filterBtn, filter === key && s.filterBtnActive]}
-              activeOpacity={0.8}
-            >
-              <Text style={[s.filterText, filter === key && s.filterTextActive]}>{label}</Text>
-            </TouchableOpacity>
-          ))}
+          {weekDays.map(d => {
+            const dStr = toYYYYMMDD(d);
+            const isSelected = selectedDateStr === dStr;
+            const isToday = toYYYYMMDD(todayDate) === dStr;
+            const eventCount = eventsCountPerDate[dStr] || 0;
+
+            return (
+              <TouchableOpacity
+                key={dStr}
+                onPress={() => setSelectedDate(d)}
+                style={[
+                  s.dayCard,
+                  isSelected && s.dayCardSelected,
+                  isToday && !isSelected && s.dayCardToday,
+                ]}
+                activeOpacity={0.85}
+              >
+                <Text style={[s.dayName, isSelected ? s.dayNameSelected : isToday ? s.dayNameToday : null]}>
+                  {DAYS_FR[d.getDay()]}
+                </Text>
+                <Text style={[s.dayNum, isSelected ? s.dayNumSelected : isToday ? s.dayNumToday : null]}>
+                  {d.getDate()}
+                </Text>
+
+                {/* Indice d'événements */}
+                {eventCount > 0 && (
+                  <View style={[s.dotBadge, isSelected && s.dotBadgeSelected]}>
+                    <Text style={[s.dotBadgeText, isSelected && s.dotBadgeTextSelected]}>
+                      {eventCount}
+                    </Text>
+                  </View>
+                )}
+              </TouchableOpacity>
+            );
+          })}
         </ScrollView>
       </SafeAreaView>
 
-      {/* Erreur */}
+      {/* ── Section Événements du Jour Sélectionné ── */}
+      <View style={s.selectedDayHeader}>
+        <Text style={s.selectedDayTitle}>
+          {DAYS_FR[selectedDate.getDay()]} {selectedDate.getDate()} {MONTHS_FR[selectedDate.getMonth()]}
+        </Text>
+        <Text style={s.selectedDayCount}>
+          {eventsOnSelectedDate.length} événement(s)
+        </Text>
+      </View>
+
+      {/* Message d'erreur */}
       {error && !isLoading && (
         <View style={s.errorBanner}>
           <AlertCircle color={C.red500} size={16} />
@@ -168,8 +363,9 @@ export default function AudiencesScreen() {
         </View>
       )}
 
+      {/* Liste des Événements */}
       <FlatList
-        data={audiences}
+        data={eventsOnSelectedDate}
         keyExtractor={item => String(item.id)}
         contentContainerStyle={s.list}
         showsVerticalScrollIndicator={false}
@@ -179,71 +375,306 @@ export default function AudiencesScreen() {
         ListEmptyComponent={
           isLoading
             ? <View style={s.center}><ActivityIndicator color={C.amber500} size="large" /></View>
-            : <View style={s.center}><Calendar color={C.gray400} size={48} /><Text style={s.emptyText}>Aucune audience</Text></View>
+            : (
+              <View style={s.center}>
+                <Calendar color={C.gray300} size={48} />
+                <Text style={s.emptyTitle}>Aucun événement ce jour</Text>
+                <Text style={s.emptySub}>Planifiez une audience, un rendez-vous ou une réunion.</Text>
+                <TouchableOpacity style={s.addEmptyBtn} onPress={() => handleOpenAddModal(selectedDate)}>
+                  <Plus color={C.gray900} size={16} />
+                  <Text style={s.addEmptyBtnText}>Ajouter un événement</Text>
+                </TouchableOpacity>
+              </View>
+            )
         }
-        renderItem={renderItem}
+        renderItem={renderEventItem}
       />
 
-      <TouchableOpacity style={s.fab} activeOpacity={0.85}>
+      {/* FAB (Bouton Flottant) */}
+      <TouchableOpacity style={s.fab} onPress={() => handleOpenAddModal(selectedDate)} activeOpacity={0.85}>
         <Plus color={C.gray900} size={28} />
       </TouchableOpacity>
+
+      {/* ── MODAL CRÉATION ÉVÉNEMENT / AUDIENCE ── */}
+      <Modal visible={showAddModal} transparent animationType="slide" onRequestClose={() => setShowAddModal(false)}>
+        <TouchableOpacity style={s.modalOverlay} activeOpacity={1} onPress={() => setShowAddModal(false)}>
+          <TouchableOpacity style={s.sheet} activeOpacity={1} onPress={() => {}}>
+            <View style={s.sheetHandle} />
+            <Text style={s.sheetTitle}>Ajouter au calendrier</Text>
+
+            <ScrollView showsVerticalScrollIndicator={false}>
+
+              {/* Sélection Catégorie */}
+              <Text style={s.fieldLabel}>Type d'événement *</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 14 }} contentContainerStyle={{ gap: 8 }}>
+                {CATEGORIES.map(cat => (
+                  <TouchableOpacity
+                    key={cat.id}
+                    onPress={() => setEvtCategory(cat.id)}
+                    style={[
+                      s.catChip,
+                      evtCategory === cat.id && s.catChipActive,
+                      evtCategory === cat.id && cat.id === 'Audience' && s.catChipYellow,
+                    ]}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={s.catChipIcon}>{cat.icon}</Text>
+                    <Text style={[s.catChipText, evtCategory === cat.id && s.catChipTextActive]}>
+                      {cat.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+
+              {/* Date & Heure */}
+              <View style={{ flexDirection: 'row', gap: 10, marginBottom: 12 }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={s.fieldLabel}>Date (YYYY-MM-DD) *</Text>
+                  <TextInput
+                    style={s.fieldInput}
+                    value={evtDateStr}
+                    onChangeText={setEvtDateStr}
+                    placeholder="2026-09-20"
+                    placeholderTextColor={C.gray400}
+                  />
+                </View>
+                <View style={{ width: 110 }}>
+                  <Text style={s.fieldLabel}>Heure</Text>
+                  <TextInput
+                    style={s.fieldInput}
+                    value={evtHeure}
+                    onChangeText={setEvtHeure}
+                    placeholder="09:00"
+                    placeholderTextColor={C.gray400}
+                  />
+                </View>
+              </View>
+
+              {/* Titre / Objet */}
+              <View style={{ marginBottom: 12 }}>
+                <Text style={s.fieldLabel}>Intitulé / Sujet de l'événement</Text>
+                <TextInput
+                  style={s.fieldInput}
+                  value={evtTitre}
+                  onChangeText={setEvtTitre}
+                  placeholder="ex: Plaidoirie, Entretien client, Signature..."
+                  placeholderTextColor={C.gray400}
+                />
+              </View>
+
+              {/* Sélection Dossier */}
+              {dossiers.length > 0 && (
+                <View style={{ marginBottom: 12 }}>
+                  <Text style={s.fieldLabel}>Lier à un dossier (Affaire)</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+                    {dossiers.map(d => (
+                      <TouchableOpacity
+                        key={d.id}
+                        onPress={() => setEvtDossierId(d.id)}
+                        style={[s.dossierChip, evtDossierId === d.id && s.dossierChipActive]}
+                      >
+                        <Text style={[s.dossierChipText, evtDossierId === d.id && s.dossierChipTextActive]}>
+                          {d.numeroAffaire} — {d.titre}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </View>
+              )}
+
+              {/* Lieu / Juridiction */}
+              <View style={{ marginBottom: 12 }}>
+                <Text style={s.fieldLabel}>Lieu / Juridiction / Salle</Text>
+                <TextInput
+                  style={s.fieldInput}
+                  value={evtLieu}
+                  onChangeText={setEvtLieu}
+                  placeholder="ex: TGI de Yaoundé - Salle 2, Bureau Avocat..."
+                  placeholderTextColor={C.gray400}
+                />
+              </View>
+
+              {/* Notes */}
+              <View style={{ marginBottom: 12 }}>
+                <Text style={s.fieldLabel}>Notes & Observations</Text>
+                <TextInput
+                  style={[s.fieldInput, { height: 75, textAlignVertical: 'top' }]}
+                  value={evtNotes}
+                  onChangeText={setEvtNotes}
+                  multiline
+                  numberOfLines={3}
+                  placeholder="Précisions supplémentaires..."
+                  placeholderTextColor={C.gray400}
+                />
+              </View>
+
+              {/* Switch Marquer comme Important (Affiche en JAUNE) */}
+              <View style={s.importantSwitchRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={s.importantSwitchTitle}>⭐️ Marquer comme Important</Text>
+                  <Text style={s.importantSwitchSub}>Sera mis en évidence en JAUNE sur le calendrier</Text>
+                </View>
+                <Switch
+                  value={evtImportant}
+                  onValueChange={setEvtImportant}
+                  trackColor={{ false: C.gray300, true: C.amber500 }}
+                  thumbColor={evtImportant ? C.amber600 : C.gray100}
+                />
+              </View>
+
+              {/* Bouton de Sauvegarde */}
+              <TouchableOpacity
+                style={[s.saveBtn, savingEvt && { opacity: 0.6 }]}
+                onPress={handleSaveEvent}
+                disabled={savingEvt}
+                activeOpacity={0.85}
+              >
+                {savingEvt ? <ActivityIndicator color={C.gray900} /> : <Text style={s.saveBtnText}>Enregistrer l'événement</Text>}
+              </TouchableOpacity>
+
+              <TouchableOpacity style={s.cancelBtn} onPress={() => setShowAddModal(false)} activeOpacity={0.8}>
+                <Text style={s.cancelBtnText}>Annuler</Text>
+              </TouchableOpacity>
+            </ScrollView>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
     </View>
   );
 }
 
 const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: C.gray50 },
-  header: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 12 },
-  title: { fontSize: 22, fontWeight: '700', color: C.white },
-  sub: { fontSize: 13, color: C.amber400, marginTop: 2 },
-  statCard: {
+  header: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    backgroundColor: C.amber500, borderRadius: 14, marginHorizontal: 16, padding: 14, marginBottom: 12,
-    shadowColor: C.amber600, shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.3, shadowRadius: 6, elevation: 4,
+    paddingHorizontal: 16, paddingTop: 10, paddingBottom: 6,
   },
-  statLabel: { fontSize: 12, color: C.gray900, fontWeight: '500', marginBottom: 4 },
-  statVal: { fontSize: 28, fontWeight: '700', color: C.gray900 },
-  filtersContent: { paddingHorizontal: 12, gap: 8 },
-  filterBtn: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10, backgroundColor: C.gray800, borderWidth: 1, borderColor: C.gray700 },
-  filterBtnActive: { backgroundColor: C.amber500, borderColor: C.amber500 },
-  filterText: { fontSize: 13, fontWeight: '500', color: C.gray300 },
-  filterTextActive: { color: C.gray900 },
+  title: { fontSize: 22, fontWeight: '700', color: C.white },
+  sub: { fontSize: 13, color: C.amber400, marginTop: 2, fontWeight: '500' },
+  addHeaderBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    backgroundColor: C.amber500, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 7,
+  },
+  addHeaderBtnText: { fontSize: 13, fontWeight: '600', color: C.gray900 },
+  weekNavRow: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    paddingHorizontal: 16, paddingVertical: 8,
+  },
+  navArrowBtn: { padding: 6, backgroundColor: C.gray800, borderRadius: 8 },
+  todayBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: C.gray800, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 10,
+    borderWidth: 1, borderColor: C.gray700,
+  },
+  todayBtnText: { fontSize: 12, color: C.amber400, fontWeight: '600' },
+  weekStripContainer: { paddingHorizontal: 12, paddingBottom: 12, gap: 8 },
+  dayCard: {
+    width: 48, height: 64, borderRadius: 14,
+    backgroundColor: C.gray800, borderWidth: 1, borderColor: C.gray700,
+    alignItems: 'center', justifyContent: 'center', gap: 2,
+  },
+  dayCardToday: { borderColor: C.amber400 },
+  dayCardSelected: { backgroundColor: C.amber500, borderColor: C.amber500 },
+  dayName: { fontSize: 11, fontWeight: '500', color: C.gray400 },
+  dayNameToday: { color: C.amber400, fontWeight: '700' },
+  dayNameSelected: { color: C.gray900, fontWeight: '700' },
+  dayNum: { fontSize: 18, fontWeight: '700', color: C.white },
+  dayNumToday: { color: C.amber400 },
+  dayNumSelected: { color: C.gray900 },
+  dotBadge: {
+    backgroundColor: C.gray700, borderRadius: 10, paddingHorizontal: 5, paddingVertical: 1, marginTop: 2,
+  },
+  dotBadgeSelected: { backgroundColor: C.gray900 },
+  dotBadgeText: { fontSize: 9, fontWeight: '700', color: C.amber400 },
+  dotBadgeTextSelected: { color: C.amber400 },
+  selectedDayHeader: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    paddingHorizontal: 16, paddingVertical: 12, backgroundColor: C.white,
+    borderBottomWidth: 1, borderBottomColor: C.gray200,
+  },
+  selectedDayTitle: { fontSize: 15, fontWeight: '700', color: C.gray900 },
+  selectedDayCount: { fontSize: 12, fontWeight: '600', color: C.gray500 },
   errorBanner: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
-    margin: 12, padding: 12, backgroundColor: C.red50, borderRadius: 12, borderWidth: 1, borderColor: C.red200,
+    flexDirection: 'row', alignItems: 'center', gap: 8, margin: 12, padding: 12,
+    backgroundColor: C.red50, borderRadius: 12, borderWidth: 1, borderColor: C.red200,
   },
   errorText: { flex: 1, fontSize: 13, color: C.red700 },
   retryBtn: { paddingHorizontal: 10, paddingVertical: 4, backgroundColor: C.red100, borderRadius: 8 },
   retryText: { fontSize: 12, color: C.red700, fontWeight: '600' },
   list: { padding: 12, paddingBottom: 100, gap: 10 },
-  center: { alignItems: 'center', paddingTop: 60, gap: 12 },
-  emptyText: { fontSize: 15, color: C.gray500 },
+  center: { alignItems: 'center', paddingTop: 60, gap: 10 },
+  emptyTitle: { fontSize: 15, fontWeight: '700', color: C.gray800 },
+  emptySub: { fontSize: 13, color: C.gray500, textAlign: 'center', paddingHorizontal: 20 },
+  addEmptyBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 10,
+    backgroundColor: C.amber500, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 12,
+  },
+  addEmptyBtnText: { fontSize: 13, fontWeight: '600', color: C.gray900 },
   card: {
     backgroundColor: C.white, borderRadius: 16, padding: 14,
     shadowColor: C.black, shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.07, shadowRadius: 3, elevation: 2,
+    borderLeftWidth: 4, borderLeftColor: C.blue500,
   },
-  cardToday: { borderWidth: 2, borderColor: C.blue600 },
-  datebox: { borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8, alignItems: 'center', minWidth: 52 },
-  dateboxToday: { backgroundColor: C.blue600 },
-  dateboxPast: { backgroundColor: C.gray100 },
-  dateboxFuture: { backgroundColor: C.blue50 },
-  dateDay: { fontSize: 22, fontWeight: '700' },
-  dateMon: { fontSize: 11, marginTop: 2 },
-  todayBadge: { backgroundColor: C.blue600, borderRadius: 20, paddingHorizontal: 8, paddingVertical: 3, alignSelf: 'flex-start', marginBottom: 4 },
-  todayText: { fontSize: 11, color: C.white, fontWeight: '700' },
-  tomorrowBadge: { backgroundColor: C.orange500, borderRadius: 20, paddingHorizontal: 8, paddingVertical: 3, alignSelf: 'flex-start', marginBottom: 4 },
-  tomorrowText: { fontSize: 11, color: C.white, fontWeight: '700' },
-  affTitle: { fontSize: 14, fontWeight: '600', color: C.gray900, marginBottom: 2 },
-  meta: { fontSize: 13, color: C.gray600, marginBottom: 2 },
-  jur: { fontSize: 12, color: C.gray500, flex: 1 },
-  statusBadge: { borderRadius: 20, paddingHorizontal: 8, paddingVertical: 4 },
-  statusText: { fontSize: 12, fontWeight: '500' },
-  noteBanner: { marginTop: 6, backgroundColor: C.amber50, borderRadius: 8, padding: 8 },
-  noteText: { fontSize: 12, color: C.amber900 },
+  cardYellow: {
+    backgroundColor: '#fffbeb', borderLeftColor: C.amber500, borderWidth: 1, borderColor: C.amber200,
+  },
+  timeBox: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    backgroundColor: C.blue50, paddingHorizontal: 8, paddingVertical: 6, borderRadius: 8,
+  },
+  timeBoxYellow: { backgroundColor: C.amber100 },
+  timeText: { fontSize: 12, fontWeight: '700', color: C.blue700 },
+  timeTextYellow: { color: C.amber900 },
+  catBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 12 },
+  catBadgeText: { fontSize: 11, fontWeight: '700' },
+  importantPill: {
+    flexDirection: 'row', alignItems: 'center', gap: 3,
+    backgroundColor: C.amber200, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 8,
+  },
+  importantPillText: { fontSize: 9, fontWeight: '800', color: C.amber900 },
+  evtDossierRef: { fontSize: 12, fontWeight: '600', color: C.gray800, marginTop: 2 },
+  evtLieu: { fontSize: 12, color: C.gray600 },
+  notesBox: { backgroundColor: C.gray50, borderRadius: 8, padding: 8, marginTop: 6 },
+  notesBoxYellow: { backgroundColor: '#fef3c7' },
+  notesContent: { fontSize: 12, color: C.gray700 },
   fab: {
     position: 'absolute', bottom: 80, right: 20,
     width: 56, height: 56, backgroundColor: C.amber500, borderRadius: 28,
     alignItems: 'center', justifyContent: 'center',
     shadowColor: C.amber600, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.4, shadowRadius: 8, elevation: 8,
   },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  sheet: { backgroundColor: C.white, borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: '88%', padding: 20 },
+  sheetHandle: { width: 40, height: 4, backgroundColor: C.gray200, borderRadius: 2, alignSelf: 'center', marginBottom: 16 },
+  sheetTitle: { fontSize: 17, fontWeight: '700', color: C.gray900, marginBottom: 16 },
+  fieldLabel: { fontSize: 13, fontWeight: '600', color: C.gray900, marginBottom: 6 },
+  fieldInput: { borderWidth: 1, borderColor: C.gray200, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 11, fontSize: 14, color: C.gray900 },
+  catChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10,
+    backgroundColor: C.gray100, borderWidth: 1, borderColor: C.gray200,
+  },
+  catChipActive: { backgroundColor: C.blue500, borderColor: C.blue500 },
+  catChipYellow: { backgroundColor: C.amber500, borderColor: C.amber500 },
+  catChipIcon: { fontSize: 14 },
+  catChipText: { fontSize: 12, fontWeight: '500', color: C.gray700 },
+  catChipTextActive: { color: C.gray900, fontWeight: '700' },
+  dossierChip: {
+    paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10,
+    backgroundColor: C.gray100, borderWidth: 1, borderColor: C.gray200,
+  },
+  dossierChipActive: { backgroundColor: C.amber100, borderColor: C.amber400 },
+  dossierChipText: { fontSize: 12, color: C.gray700 },
+  dossierChipTextActive: { color: C.amber900, fontWeight: '700' },
+  importantSwitchRow: {
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: C.amber50, borderWidth: 1, borderColor: C.amber200,
+    borderRadius: 12, padding: 12, marginBottom: 12,
+  },
+  importantSwitchTitle: { fontSize: 13, fontWeight: '700', color: C.amber900 },
+  importantSwitchSub: { fontSize: 11, color: C.amber700, marginTop: 2 },
+  saveBtn: { backgroundColor: C.amber500, borderRadius: 14, paddingVertical: 14, alignItems: 'center', marginTop: 12, marginBottom: 10 },
+  saveBtnText: { fontSize: 15, fontWeight: '600', color: C.gray900 },
+  cancelBtn: { borderWidth: 1, borderColor: C.gray200, borderRadius: 14, paddingVertical: 14, alignItems: 'center' },
+  cancelBtnText: { fontSize: 14, fontWeight: '500', color: C.gray500 },
 });

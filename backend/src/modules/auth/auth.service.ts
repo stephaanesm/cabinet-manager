@@ -1,9 +1,9 @@
 import { BadRequestException, Injectable, UnauthorizedException } from '@nestjs/common';
-import { UsersService, SafeUserProfile } from '../users/users.service';
-import { TokenService, PaireDeJetons } from './token.service';
-import { TwoFactorService } from './two-factor.service';
-import { RoleLibelle } from '../users/entities/role-acces.entity';
 import * as argon2 from 'argon2';
+import { RoleLibelle } from '../users/entities/role-acces.entity';
+import { SafeUserProfile, UsersService } from '../users/users.service';
+import { PaireDeJetons, TokenService } from './token.service';
+import { TwoFactorService } from './two-factor.service';
 
 export interface PreAuthResponse {
   requiresTwoFactor: true;
@@ -93,7 +93,7 @@ export class AuthService {
     const user = await this.usersService.createUser({ nom, email, motDePasse, role });
 
     return {
-      message: 'Compte créé avec succès. Un administrateur activera votre compte prochainement.',
+      message: 'Compte créé avec succès. Vous pouvez vous connecter immédiatement.',
       user,
     };
   }

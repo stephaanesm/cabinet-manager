@@ -14,7 +14,8 @@
 import api, {
     authExpiredEmitter,
     extractErrorMessage,
-    LoginResponse
+    LoginResponse,
+    TokenPair,
 } from '@/lib/api';
 import {
     clearAll,
@@ -132,7 +133,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const inAuthGroup = segments[0] === '(tabs)';
     const inAdminGroup = segments[0] === 'admin';
-    const onLogin = segments[0] === 'login' || segments[0] === undefined || segments[0] === 'index';
+    const onLogin = segments[0] === 'login' || segments[0] === undefined || (segments[0] as string) === 'index';
 
     if (!user && (inAuthGroup || inAdminGroup)) {
       hasNavigated.current = true;

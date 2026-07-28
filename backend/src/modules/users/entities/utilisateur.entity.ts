@@ -11,7 +11,7 @@
  * construit systématiquement une version "publique" sans champs sensibles.
  * ---------------------------------------------------------------------------
  */
-import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, JoinColumn } from 'typeorm';
+import { Column, Entity, JoinColumn, ManyToOne, PrimaryGeneratedColumn } from 'typeorm';
 import { Cabinet } from './cabinet.entity';
 import { RoleAcces, RoleLibelle } from './role-acces.entity';
 
@@ -44,7 +44,7 @@ export class Utilisateur {
   @Column({ name: 'mot_de_passe_hash', type: 'varchar', length: 255 })
   motDePasseHash: string;
 
-  @Column({ name: 'role', type: 'enum', enum: RoleLibelle })
+  @Column({ name: 'role', type: 'enum', enum: RoleLibelle, enumName: 'role_libelle' })
   role: RoleLibelle;
 
   @Column({ name: 'authentif_2fa_actif', type: 'boolean', default: false })

@@ -1,16 +1,29 @@
-import { useState } from 'react';
-import {
-  View, Text, TextInput, TouchableOpacity, StyleSheet, FlatList,
-  Modal, ScrollView, ActivityIndicator, RefreshControl, Alert,
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import {
-  Search, CheckCircle, XCircle, Mail, User,
-  ChevronRight, Lock, Unlock, X, AlertCircle, Clock,
-} from 'lucide-react-native';
 import { AppColors as C } from '@/constants/theme';
 import { useAdminUsers } from '@/hooks/useAdminUsers';
 import { UserProfile } from '@/services/users.service';
+import {
+    AlertCircle,
+    CheckCircle,
+    ChevronRight, Lock,
+    Mail,
+    Search,
+    User,
+    X,
+    XCircle
+} from 'lucide-react-native';
+import { useState } from 'react';
+import {
+    ActivityIndicator,
+    Alert,
+    FlatList,
+    Modal,
+    RefreshControl,
+    ScrollView,
+    StyleSheet,
+    Text, TextInput, TouchableOpacity,
+    View,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 const ROLE_CFG: Record<string, { label: string; color: string; bg: string }> = {
   Administrateur: { label: 'Administrateur', color: '#dc2626', bg: '#fef2f2' },
@@ -148,7 +161,7 @@ export default function UtilisateursScreen() {
                   <Text style={s.userName}>{u.nom}</Text>
                   {!u.actif && (
                     <View style={s.pendingBadge}>
-                      <Text style={s.pendingText}>EN ATTENTE</Text>
+                      <Text style={s.pendingText}>DÉSACTIVÉ</Text>
                     </View>
                   )}
                 </View>
@@ -190,7 +203,7 @@ export default function UtilisateursScreen() {
                         ? <CheckCircle color={C.green600} size={13} />
                         : <XCircle color={C.gray500} size={13} />}
                       <Text style={[s.statusText, { color: selected.actif ? C.green600 : C.gray500 }]}>
-                        {selected.actif ? 'Actif' : 'En attente'}
+                        {selected.actif ? 'Actif' : 'Désactivé'}
                       </Text>
                     </View>
                   </View>
@@ -207,28 +220,30 @@ export default function UtilisateursScreen() {
                     </View>
                   </View>
 
-                  {/* Actions d'activation */}
+                  {/* Action : désactivation uniquement */}
                   <View style={{ marginTop: 8, paddingBottom: 20 }}>
-                    <TouchableOpacity
-                      style={[s.actionBtn, selected.actif ? s.actionBtnDanger : s.actionBtnSuccess]}
-                      onPress={() => handleToggleActif(selected)}
-                      disabled={isUpdating}
-                      activeOpacity={0.85}
-                    >
-                      {isUpdating ? (
-                        <ActivityIndicator color={selected.actif ? C.red700 : C.green700} />
-                      ) : selected.actif ? (
-                        <>
-                          <Lock color={C.red700} size={16} />
-                          <Text style={s.actionBtnDangerText}>Désactiver le compte</Text>
-                        </>
-                      ) : (
-                        <>
-                          <Unlock color={C.green700} size={16} />
-                          <Text style={s.actionBtnSuccessText}>Activer le compte (Valider Inscription)</Text>
-                        </>
-                      )}
-                    </TouchableOpacity>
+                    {selected.actif ? (
+                      <TouchableOpacity
+                        style={[s.actionBtn, s.actionBtnDanger]}
+                        onPress={() => handleToggleActif(selected)}
+                        disabled={isUpdating}
+                        activeOpacity={0.85}
+                      >
+                        {isUpdating ? (
+                          <ActivityIndicator color={C.red700} />
+                        ) : (
+                          <>
+                            <Lock color={C.red700} size={16} />
+                            <Text style={s.actionBtnDangerText}>Désactiver le compte</Text>
+                          </>
+                        )}
+                      </TouchableOpacity>
+                    ) : (
+                      <View style={s.disabledNotice}>
+                        <XCircle color={C.gray400} size={16} />
+                        <Text style={s.disabledNoticeText}>Compte désactivé — connexion impossible</Text>
+                      </View>
+                    )}
                     <TouchableOpacity style={s.closeBtn} onPress={() => setSelected(null)} activeOpacity={0.8}>
                       <Text style={s.closeBtnText}>Fermer</Text>
                     </TouchableOpacity>
@@ -301,4 +316,6 @@ const s = StyleSheet.create({
   actionBtnSuccessText: { fontSize: 15, fontWeight: '600', color: C.green700 },
   closeBtn: { borderWidth: 1, borderColor: C.gray200, borderRadius: 14, paddingVertical: 14, alignItems: 'center' },
   closeBtnText: { fontSize: 14, fontWeight: '500', color: C.gray500 },
+  disabledNotice: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: C.gray50, borderWidth: 1, borderColor: C.gray200, borderRadius: 14, paddingVertical: 14, paddingHorizontal: 16, marginBottom: 10 },
+  disabledNoticeText: { fontSize: 14, color: C.gray500, fontWeight: '500' },
 });

@@ -8,12 +8,12 @@ import { extractErrorMessage } from '@/hooks/useAuth';
 import api from '@/lib/api';
 import { useRouter } from 'expo-router';
 import {
-  ArrowLeft, Briefcase, ChevronRight, Eye, EyeOff, Mail, User,
+    ArrowLeft, Briefcase, ChevronRight, Eye, EyeOff, Mail, User,
 } from 'lucide-react-native';
 import { useState } from 'react';
 import {
-  ActivityIndicator, KeyboardAvoidingView, Platform,
-  ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View,
+    ActivityIndicator, KeyboardAvoidingView, Platform,
+    ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -76,8 +76,7 @@ export default function RegisterScreen() {
             </View>
             <Text style={s.successTitle}>Compte créé avec succès !</Text>
             <Text style={s.successDesc}>
-              Votre demande a été enregistrée. Un administrateur du cabinet activera votre compte.
-              Vous recevrez une notification par email.
+              Votre compte est actif. Vous pouvez vous connecter immédiatement.
             </Text>
             <TouchableOpacity style={s.primaryBtn} onPress={() => router.replace('/login')} activeOpacity={0.85}>
               <Text style={s.primaryBtnText}>Retour à la connexion</Text>

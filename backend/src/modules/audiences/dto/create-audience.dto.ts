@@ -4,7 +4,10 @@ import {
 } from 'class-validator';
 import { AudienceStatut } from '../entities/audience.entity';
 
+import { Type } from 'class-transformer';
+
 export class CreateAudienceDto {
+  @Type(() => Number)
   @IsInt()
   dossierId: number;
 

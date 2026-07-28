@@ -44,17 +44,12 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="audiences"
         options={{
-          title: 'Audiences',
+          title: 'Calendrier',
+          tabBarLabel: 'Calendrier',
           tabBarIcon: ({ color, size }) => <Calendar color={color} size={size} />,
         }}
       />
-      <Tabs.Screen
-        name="documents"
-        options={{
-          title: 'Documents',
-          tabBarIcon: ({ color, size }) => <FileText color={color} size={size} />,
-        }}
-      />
+
       <Tabs.Screen
         name="facturation"
         options={{

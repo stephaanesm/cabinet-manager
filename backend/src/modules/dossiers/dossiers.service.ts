@@ -266,7 +266,7 @@ export class DossiersService {
     const resultat: Array<{ total_facture: string; total_encaisse: string }> =
       await this.dossierRepository.manager.query(
         `SELECT
-           COALESCE(SUM(montant_honoraires), 0) AS total_facture,
+           COALESCE(SUM(montant_ttc), 0)        AS total_facture,
            COALESCE(SUM(montant_encaisse), 0)   AS total_encaisse
          FROM factures
          WHERE dossier_id = $1 AND deleted_at IS NULL`,

@@ -1,9 +1,9 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { IsNull, Repository } from 'typeorm';
-import { Utilisateur } from './entities/utilisateur.entity';
-import { RoleAcces, RoleLibelle } from './entities/role-acces.entity';
 import * as argon2 from 'argon2';
+import { IsNull, Repository } from 'typeorm';
+import { RoleAcces, RoleLibelle } from './entities/role-acces.entity';
+import { Utilisateur } from './entities/utilisateur.entity';
 
 /** Nombre d'échecs de connexion consécutifs avant verrouillage temporaire. */
 export const MAX_TENTATIVES_CONNEXION = 5;
@@ -119,7 +119,7 @@ export class UsersService {
       email: email.trim().toLowerCase(),
       motDePasseHash,
       role,
-      actif: false,
+      actif: true,
       authentif2faActif: false,
       authentif2faSecret: null,
       echecsConnexion: 0,

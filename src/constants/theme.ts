@@ -36,17 +36,22 @@ export const AppColors = {
   amber800: '#92400e',
   amber900: '#78350f',
 
-  // Grays
-  gray50:  '#f9fafb',
-  gray100: '#f3f4f6',
-  gray200: '#e5e7eb',
-  gray300: '#d1d5db',
-  gray400: '#9ca3af',
-  gray500: '#6b7280',
-  gray600: '#4b5563',
-  gray700: '#374151',
-  gray800: '#1f2937',
-  gray900: '#111827',
+  // Executive Navy (Bleu Nuit Prestige Avocat)
+  navy900: '#0f172a',
+  navy800: '#1e293b',
+  navy700: '#334155',
+
+  // Grays / Slate
+  gray50:  '#f8fafc',
+  gray100: '#f1f5f9',
+  gray200: '#e2e8f0',
+  gray300: '#cbd5e1',
+  gray400: '#94a3b8',
+  gray500: '#64748b',
+  gray600: '#475569',
+  gray700: '#334155',
+  gray800: '#1e293b',
+  gray900: '#0f172a',
   black:   '#000000',
   white:   '#ffffff',
 
