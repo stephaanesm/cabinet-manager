@@ -28,6 +28,8 @@ import { JournalActivite } from './modules/journal/entities/journal-activite.ent
 import { Cabinet } from './modules/users/entities/cabinet.entity';
 import { RoleAcces } from './modules/users/entities/role-acces.entity';
 import { Utilisateur } from './modules/users/entities/utilisateur.entity';
+import { NotificationsModule } from './modules/notifications/notifications.module';
+import { Notification } from './modules/notifications/entities/notification.entity';
 
 @Module({
   imports: [
@@ -50,6 +52,7 @@ import { Utilisateur } from './modules/users/entities/utilisateur.entity';
         Document,
         Facture,
         Encaissement,
+        Notification,
       ],
       synchronize: false,
       logging: process.env.NODE_ENV === 'development' ? ['query', 'error'] : ['error'],
@@ -63,6 +66,7 @@ import { Utilisateur } from './modules/users/entities/utilisateur.entity';
     AudiencesModule,
     DocumentsModule,
     FacturationModule,
+    NotificationsModule,
   ],
   controllers: [HealthController],
 })

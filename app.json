@@ -2,6 +2,7 @@
   "expo": {
     "name": "Cabinet Manager",
     "slug": "cabinet_manager",
+    "owner": "momosm",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -48,6 +49,13 @@
       "eas": {
         "projectId": "7927fe3a-6021-401d-9133-81d304b1e24c"
       }
-    }
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/7927fe3a-6021-401d-9133-81d304b1e24c"
+    },
+    "ios": {}
   }
 }
