@@ -13,11 +13,9 @@ import { useDocuments } from '@/hooks/useDocuments';
 import { useFactures } from '@/hooks/useFactures';
 import { cloturerDossier, deleteDossier, DossierStatut, updateDossier } from '@/services/dossiers.service';
 import { Document as DocItem, DocumentConfidentialite, getDocumentDownloadUrl } from '@/services/documents.service';
-import { getAccessToken } from '@/lib/secureStorage';
+import { apercuAvecAppCompatible, getMimeType, telechargerDansTelephone } from '@/lib/fileViewerManager';
 import * as DocumentPicker from 'expo-document-picker';
-import { cacheDirectory, downloadAsync, getInfoAsync } from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
-import * as Sharing from 'expo-sharing';
 import * as WebBrowser from 'expo-web-browser';
 import { DateTimePickerModal } from '@/components/DateTimePickerModal';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -366,36 +364,37 @@ const AGENDA_CATEGORIES: { id: EventCategory; label: string; icon: string }[] = 
     setShowViewDocModal(true);
   };
 
-  const handleDownloadDoc = async (doc: DocItem) => {
+  /**
+   * CONSULTER : télécharge en cache et ouvre avec une application compatible
+   * (Adobe Acrobat, Word, Google Docs, Galerie, VLC…)
+   */
+  const handleConsulterDoc = async (doc: DocItem) => {
     setDownloadingDoc(true);
     try {
-      const url   = getDocumentDownloadUrl(doc.id);
-      const token = await getAccessToken();
-
-      const safeName = doc.nom.replace(/[^a-zA-Z0-9._\-]/g, '_');
-      const localUri = (cacheDirectory ?? 'file:///') + safeName;
-
-      const result = await downloadAsync(url, localUri, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
-
-      if (result.status === 200) {
-        const canShare = await Sharing.isAvailableAsync();
-        if (canShare) {
-          await Sharing.shareAsync(result.uri, {
-            mimeType:    doc.typeDocument ?? 'application/octet-stream',
-            dialogTitle: `Consulter ${doc.nom}`,
-          });
-        }
-      } else {
-        throw new Error(`Erreur serveur HTTP ${result.status}`);
-      }
-    } catch (e: any) {
-      Alert.alert('Erreur', e?.message ?? 'Impossible d\'ouvrir le document.');
+      const url  = getDocumentDownloadUrl(doc.id);
+      const mime = getMimeType(doc.nom);
+      await apercuAvecAppCompatible(url, doc.nom, mime);
     } finally {
       setDownloadingDoc(false);
     }
   };
+
+  /**
+   * TÉLÉCHARGER : enregistre le fichier dans le stockage du téléphone
+   * (Dossier Téléchargements sur Android, Fichiers sur iOS)
+   */
+  const handleDownloadDoc = async (doc: DocItem) => {
+    setDownloadingDoc(true);
+    try {
+      const url  = getDocumentDownloadUrl(doc.id);
+      const mime = getMimeType(doc.nom);
+      await telechargerDansTelephone(url, doc.nom, mime);
+    } finally {
+      setDownloadingDoc(false);
+    }
+  };
+
+
 
   const getDocTypeIconAndColor = (typeDoc: string | null, name: string) => {
     const t = (typeDoc || '').toLowerCase();
@@ -863,7 +862,7 @@ const AGENDA_CATEGORIES: { id: EventCategory; label: string; icon: string }[] = 
                 <View style={{ gap: 10 }}>
                   <TouchableOpacity
                     style={s.downloadActionBtn}
-                    onPress={() => handleDownloadDoc(selectedDoc)}
+                    onPress={() => handleConsulterDoc(selectedDoc)}
                     disabled={downloadingDoc}
                     activeOpacity={0.85}
                   >
