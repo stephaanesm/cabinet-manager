@@ -1,7 +1,8 @@
 import {
-  Body, Controller, Get, Param, ParseIntPipe,
-  Patch, Post, Query,
+  Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseIntPipe,
+  Patch, Post, Query, Res,
 } from '@nestjs/common';
+import { Response } from 'express';
 import { FacturationService } from './facturation.service';
 import { CreateFactureDto } from './dto/create-facture.dto';
 import { UpdateFactureDto } from './dto/update-facture.dto';
@@ -35,6 +36,19 @@ export class FacturationController {
     return this.svc.findOneFacture(id, user);
   }
 
+  @RequirePermission('factures', 'read')
+  @Get(':id/pdf')
+  async downloadPdf(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: AuthenticatedUser,
+    @Res() res: Response,
+  ) {
+    const pdfBuffer = await this.svc.genererPdfFacture(id, user);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="facture_${id}.pdf"`);
+    res.send(pdfBuffer);
+  }
+
   @RequirePermission('factures', 'update')
   @Patch(':id')
   update(
@@ -49,6 +63,13 @@ export class FacturationController {
   @Post(':id/envoyer')
   envoyer(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: AuthenticatedUser) {
     return this.svc.envoyerFacture(id, user);
+  }
+
+  @RequirePermission('factures', 'update')
+  @Delete(':id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  deleteFacture(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: AuthenticatedUser) {
+    return this.svc.deleteFacture(id, user);
   }
 
   // ── Encaissements ─────────────────────────────────────────────────────

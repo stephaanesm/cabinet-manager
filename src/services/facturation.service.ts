@@ -106,6 +106,10 @@ export async function envoyerFacture(id: number): Promise<Facture> {
   return data;
 }
 
+export async function deleteFacture(id: number): Promise<void> {
+  await api.delete(`/factures/${id}`);
+}
+
 export async function addEncaissement(factureId: number, dto: CreateEncaissementDto): Promise<Facture> {
   const { data } = await api.post<Facture>(`/factures/${factureId}/encaissements`, dto);
   return data;

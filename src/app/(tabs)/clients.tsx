@@ -7,16 +7,25 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import {
   Search, Plus, Phone, Mail, MapPin, User,
-  ChevronRight, X, AlertCircle,
+  ChevronRight, X, AlertCircle, Trash2, Pencil,
 } from 'lucide-react-native';
 import { AppColors as C } from '@/constants/theme';
 import { useClients } from '@/hooks/useClients';
-import { Client } from '@/services/clients.service';
+import { Client, deleteClient, updateClient } from '@/services/clients.service';
+import { extractErrorMessage } from '@/lib/api';
+import { Alert } from 'react-native';
 
 export default function ClientsScreen() {
   const router = useRouter();
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState<Client | null>(null);
+
+  // Édit client states
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editNom, setEditNom]             = useState('');
+  const [editTel, setEditTel]             = useState('');
+  const [editEmail, setEditEmail]         = useState('');
+  const [updatingClient, setUpdatingClient] = useState(false);
 
   const { clients, isLoading, error, total, refetch } = useClients({
     search: search.trim() ? search.trim() : undefined,
@@ -26,6 +35,61 @@ export default function ClientsScreen() {
     const parts = c.nomComplet.trim().split(' ');
     if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
     return c.nomComplet.slice(0, 2).toUpperCase() || '?';
+  };
+
+  const handleDeleteClient = (c: Client) => {
+    Alert.alert(
+      'Supprimer le client',
+      `Êtes-vous sûr de vouloir supprimer définitivement le client "${c.nomComplet}" ? Cette action est irréversible.`,
+      [
+        { text: 'Annuler', style: 'cancel' },
+        {
+          text: 'Supprimer',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deleteClient(Number(c.id));
+              setSelected(null);
+              refetch();
+              Alert.alert('Succès', 'Le client a été supprimé avec succès.');
+            } catch (e) {
+              Alert.alert('Erreur', extractErrorMessage(e));
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handleOpenEditModal = (c: Client) => {
+    setEditNom(c.nomComplet);
+    setEditTel(c.telephone || '');
+    setEditEmail(c.email || '');
+    setShowEditModal(true);
+  };
+
+  const handleUpdateClient = async () => {
+    if (!selected) return;
+    if (!editNom.trim()) {
+      Alert.alert('Erreur', 'Le nom du client est obligatoire.');
+      return;
+    }
+    setUpdatingClient(true);
+    try {
+      await updateClient(Number(selected.id), {
+        nomComplet: editNom.trim(),
+        telephone: editTel.trim() || undefined,
+        email: editEmail.trim() || undefined,
+      });
+      setShowEditModal(false);
+      setSelected(null);
+      refetch();
+      Alert.alert('Succès', 'Informations du client mises à jour avec succès.');
+    } catch (e) {
+      Alert.alert('Erreur', extractErrorMessage(e));
+    } finally {
+      setUpdatingClient(false);
+    }
   };
 
   return (
@@ -146,13 +210,91 @@ export default function ClientsScreen() {
                 </View>
 
                 {/* Actions */}
-                <View style={{ marginTop: 8 }}>
+                <View style={{ marginTop: 12, gap: 10 }}>
+                  <TouchableOpacity
+                    style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: C.amber50, borderWidth: 1, borderColor: C.amber300, borderRadius: 14, paddingVertical: 14 }}
+                    onPress={() => handleOpenEditModal(selected)}
+                    activeOpacity={0.8}
+                  >
+                    <Pencil color={C.amber900} size={18} />
+                    <Text style={{ fontSize: 14, fontWeight: '700', color: C.amber900 }}>Modifier les informations</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: C.red50, borderWidth: 1, borderColor: C.red200, borderRadius: 14, paddingVertical: 14 }}
+                    onPress={() => handleDeleteClient(selected)}
+                    activeOpacity={0.8}
+                  >
+                    <Trash2 color={C.red600} size={18} />
+                    <Text style={{ fontSize: 14, fontWeight: '700', color: C.red600 }}>Supprimer ce client</Text>
+                  </TouchableOpacity>
+
                   <TouchableOpacity style={s.closeBtn} onPress={() => setSelected(null)} activeOpacity={0.8}>
                     <Text style={s.closeBtnText}>Fermer</Text>
                   </TouchableOpacity>
                 </View>
               </ScrollView>
             )}
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* Modal Édition Client */}
+      <Modal visible={showEditModal} transparent animationType="slide" onRequestClose={() => setShowEditModal(false)}>
+        <TouchableOpacity style={s.modalOverlay} onPress={() => setShowEditModal(false)} activeOpacity={1}>
+          <TouchableOpacity style={s.sheet} activeOpacity={1} onPress={() => {}}>
+            <View style={s.sheetHandle} />
+            <Text style={{ fontSize: 17, fontWeight: '700', color: C.gray900, marginBottom: 14 }}>Modifier le client</Text>
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+              <View style={{ marginBottom: 12 }}>
+                <Text style={{ fontSize: 13, fontWeight: '600', color: C.gray900, marginBottom: 6 }}>Nom complet *</Text>
+                <TextInput
+                  style={{ borderWidth: 1, borderColor: C.gray200, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 11, fontSize: 14, color: C.gray900 }}
+                  value={editNom}
+                  onChangeText={setEditNom}
+                  placeholder="Nom et Prénom du client"
+                  placeholderTextColor={C.gray400}
+                />
+              </View>
+
+              <View style={{ marginBottom: 12 }}>
+                <Text style={{ fontSize: 13, fontWeight: '600', color: C.gray900, marginBottom: 6 }}>Téléphone</Text>
+                <TextInput
+                  style={{ borderWidth: 1, borderColor: C.gray200, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 11, fontSize: 14, color: C.gray900 }}
+                  value={editTel}
+                  onChangeText={setEditTel}
+                  keyboardType="phone-pad"
+                  placeholder="+237 6..."
+                  placeholderTextColor={C.gray400}
+                />
+              </View>
+
+              <View style={{ marginBottom: 16 }}>
+                <Text style={{ fontSize: 13, fontWeight: '600', color: C.gray900, marginBottom: 6 }}>Adresse Email</Text>
+                <TextInput
+                  style={{ borderWidth: 1, borderColor: C.gray200, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 11, fontSize: 14, color: C.gray900 }}
+                  value={editEmail}
+                  onChangeText={setEditEmail}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  placeholder="client@domaine.com"
+                  placeholderTextColor={C.gray400}
+                />
+              </View>
+
+              <TouchableOpacity
+                style={[{ backgroundColor: C.amber500, borderRadius: 12, paddingVertical: 14, alignItems: 'center' }, updatingClient && { opacity: 0.6 }]}
+                onPress={handleUpdateClient}
+                disabled={updatingClient}
+                activeOpacity={0.85}
+              >
+                {updatingClient ? <ActivityIndicator color={C.gray900} /> : <Text style={{ fontSize: 14, fontWeight: '700', color: C.gray900 }}>Enregistrer les modifications</Text>}
+              </TouchableOpacity>
+
+              <TouchableOpacity style={{ borderWidth: 1, borderColor: C.gray200, borderRadius: 12, paddingVertical: 14, alignItems: 'center', marginTop: 8 }} onPress={() => setShowEditModal(false)} activeOpacity={0.8}>
+                <Text style={{ fontSize: 14, fontWeight: '500', color: C.gray500 }}>Annuler</Text>
+              </TouchableOpacity>
+            </ScrollView>
           </TouchableOpacity>
         </TouchableOpacity>
       </Modal>

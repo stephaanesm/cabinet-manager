@@ -40,9 +40,21 @@ export default function LoginScreen() {
         setPreAuthToken(outcome.preAuthToken);
         setStep('2fa');
       }
-      // Si succès direct (2FA désactivé), useAuth redirige automatiquement
-    } catch (e) {
-      setError(extractErrorMessage(e));
+    } catch (e: any) {
+      const msg = extractErrorMessage(e);
+      if (
+        !msg ||
+        msg.toLowerCase().includes('401') ||
+        msg.toLowerCase().includes('unauthorized') ||
+        msg.toLowerCase().includes('incorrect') ||
+        msg.toLowerCase().includes('invalide') ||
+        msg.toLowerCase().includes('credentials') ||
+        msg.toLowerCase().includes('failed')
+      ) {
+        setError('Adresse email ou mot de passe incorrect. Veuillez ré-essayer.');
+      } else {
+        setError(msg);
+      }
     } finally {
       setIsLoading(false);
     }

@@ -6,12 +6,13 @@
 
 import { AppColors as C } from '@/constants/theme';
 import { useDossiers } from '@/hooks/useDossiers';
-import { Dossier, DossierStatut } from '@/services/dossiers.service';
+import { deleteDossier, Dossier, DossierStatut } from '@/services/dossiers.service';
+import { extractErrorMessage } from '@/lib/api';
 import { useRouter } from 'expo-router';
-import { AlertCircle, Briefcase, ChevronRight, Plus, Search } from 'lucide-react-native';
+import { AlertCircle, Briefcase, ChevronRight, Plus, Search, Trash2 } from 'lucide-react-native';
 import { useCallback, useState } from 'react';
 import {
-  ActivityIndicator, FlatList, RefreshControl, StyleSheet,
+  ActivityIndicator, Alert, FlatList, RefreshControl, StyleSheet,
   Text, TextInput, TouchableOpacity, View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -54,6 +55,29 @@ export default function AffairesScreen() {
     setSearch('');
   }, []);
 
+  const handleDeleteDossier = useCallback((d: Dossier) => {
+    Alert.alert(
+      'Supprimer le dossier',
+      `Êtes-vous sûr de vouloir supprimer le dossier "${d.titre}" (${d.numeroAffaire}) ? Cette action est irréversible.`,
+      [
+        { text: 'Annuler', style: 'cancel' },
+        {
+          text: 'Supprimer',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deleteDossier(d.id);
+              refetch();
+              Alert.alert('Succès', 'Le dossier a été supprimé.');
+            } catch (e) {
+              Alert.alert('Erreur', extractErrorMessage(e));
+            }
+          },
+        },
+      ]
+    );
+  }, [refetch]);
+
   const renderItem = useCallback(({ item: d }: { item: Dossier }) => {
     const stat = STATUT_MAP[d.statut] ?? { label: d.statut, bg: C.gray100, text: C.gray700 };
     return (
@@ -80,7 +104,7 @@ export default function AffairesScreen() {
         <ChevronRight color={C.gray400} size={18} style={s.arrow} />
       </TouchableOpacity>
     );
-  }, [router]);
+  }, [router, handleDeleteDossier]);
 
   return (
     <View style={s.root}>
@@ -93,6 +117,14 @@ export default function AffairesScreen() {
               {total > 0 ? `${total} affaire(s) enregistrée(s)` : 'Gestion du contentieux'}
             </Text>
           </View>
+          <TouchableOpacity
+            style={s.addBtn}
+            onPress={() => router.push('/nouvelle-affaire')}
+            activeOpacity={0.8}
+          >
+            <Plus color={C.gray900} size={16} />
+            <Text style={s.addBtnText}>Nouvelle affaire</Text>
+          </TouchableOpacity>
         </View>
 
         {/* Barre de Recherche */}
@@ -174,6 +206,16 @@ export default function AffairesScreen() {
                 <Text style={s.emptySub}>
                   {search ? 'Modifiez vos critères de recherche.' : 'Créez une première affaire dans le cabinet.'}
                 </Text>
+                {!search && (
+                  <TouchableOpacity
+                    style={s.emptyAddBtn}
+                    onPress={() => router.push('/nouvelle-affaire')}
+                    activeOpacity={0.8}
+                  >
+                    <Plus color={C.gray900} size={16} />
+                    <Text style={s.emptyAddBtnText}>Créer un dossier</Text>
+                  </TouchableOpacity>
+                )}
               </View>
             )
           }
@@ -186,6 +228,15 @@ export default function AffairesScreen() {
           }
         />
       )}
+
+      {/* Floating Action Button (FAB) pour la création rapide d'une affaire */}
+      <TouchableOpacity
+        style={s.fab}
+        onPress={() => router.push('/nouvelle-affaire')}
+        activeOpacity={0.85}
+      >
+        <Plus color={C.gray900} size={28} />
+      </TouchableOpacity>
     </View>
   );
 }
@@ -240,4 +291,25 @@ const s = StyleSheet.create({
   retryText: { fontSize: 13, fontWeight: '600', color: C.gray900 },
   emptyTitle: { fontSize: 15, fontWeight: '700', color: C.gray900, marginTop: 8 },
   emptySub: { fontSize: 12, color: C.gray500, textAlign: 'center' },
+  addBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: C.amber500, borderRadius: 10,
+    paddingHorizontal: 12, paddingVertical: 7,
+  },
+  addBtnText: { fontSize: 12, fontWeight: '700', color: C.gray900 },
+  fab: {
+    position: 'absolute', bottom: 20, right: 20,
+    width: 56, height: 56, borderRadius: 28,
+    backgroundColor: C.amber500,
+    alignItems: 'center', justifyContent: 'center',
+    shadowColor: C.black, shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3, shadowRadius: 6, elevation: 6,
+    zIndex: 100,
+  },
+  emptyAddBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: C.amber500, borderRadius: 12,
+    paddingHorizontal: 18, paddingVertical: 10, marginTop: 12,
+  },
+  emptyAddBtnText: { fontSize: 14, fontWeight: '700', color: C.gray900 },
 });

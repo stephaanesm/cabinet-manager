@@ -3,6 +3,8 @@
  * Fonctions API pour la gestion des documents (GED).
  */
 import api from '@/lib/api';
+import { API_BASE_URL } from '@/lib/constants';
+import { getAccessToken } from '@/lib/secureStorage';
 
 export type DocumentConfidentialite = 'public' | 'confidentiel' | 'secret';
 
@@ -84,4 +86,44 @@ export async function updateDocument(id: number, dto: UpdateDocumentDto): Promis
 
 export async function deleteDocument(id: number): Promise<void> {
   await api.delete(`/documents/${id}`);
+}
+
+/**
+ * Upload d'un fichier réel via multipart/form-data.
+ * @param fileAsset - asset retourné par expo-document-picker
+ * @param dossierId  - ID du dossier auquel rattacher le document (optionnel)
+ */
+export async function uploadDocument(
+  fileAsset: { uri: string; name: string; mimeType?: string },
+  dossierId?: number,
+  typeDocument?: string,
+  description?: string,
+): Promise<Document> {
+  const formData = new FormData();
+  formData.append('file', {
+    uri:  fileAsset.uri,
+    name: fileAsset.name,
+    type: fileAsset.mimeType ?? 'application/octet-stream',
+  } as unknown as Blob);
+
+  if (dossierId)    formData.append('dossierId',    String(dossierId));
+  if (typeDocument) formData.append('typeDocument', typeDocument);
+  if (description)  formData.append('description',  description);
+
+  const { data } = await api.post<Document>('/documents/upload', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
+  return data;
+}
+
+/**
+ * Construit l'URL de téléchargement pour expo-file-system.downloadAsync.
+ */
+export async function buildDownloadHeaders(): Promise<Record<string, string>> {
+  const token = await getAccessToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+export function getDocumentDownloadUrl(id: number): string {
+  return `${API_BASE_URL}/documents/${id}/download`;
 }

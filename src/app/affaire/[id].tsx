@@ -11,23 +11,25 @@ import { useAudiences } from '@/hooks/useAudiences';
 import { useDossier } from '@/hooks/useDossiers';
 import { useDocuments } from '@/hooks/useDocuments';
 import { useFactures } from '@/hooks/useFactures';
-import { cloturerDossier, updateDossier } from '@/services/dossiers.service';
-import { Document as DocItem, DocumentConfidentialite } from '@/services/documents.service';
+import { cloturerDossier, deleteDossier, DossierStatut, updateDossier } from '@/services/dossiers.service';
+import { Document as DocItem, DocumentConfidentialite, getDocumentDownloadUrl } from '@/services/documents.service';
+import { getAccessToken } from '@/lib/secureStorage';
 import * as DocumentPicker from 'expo-document-picker';
-import * as FileSystem from 'expo-file-system';
+import { cacheDirectory, downloadAsync, getInfoAsync } from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
 import * as Sharing from 'expo-sharing';
 import * as WebBrowser from 'expo-web-browser';
+import { DateTimePickerModal } from '@/components/DateTimePickerModal';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import {
-  AlertCircle, ArrowLeft, Calendar, Camera, CheckCircle2, ChevronLeft, ChevronRight,
+  AlertCircle, ArrowLeft, Calendar, Camera, CheckCircle2, ChevronLeft, ChevronRight, Clock,
   DollarSign, Download, ExternalLink, Eye, FileSpreadsheet, FileText, Globe,
   Image as ImageIcon, Lock, Paperclip, Pencil, Plus, RefreshCw, Scan, Share2,
-  ShieldAlert, Upload, X,
+  ShieldAlert, Trash2, Upload, X,
 } from 'lucide-react-native';
 import { useState } from 'react';
 import {
-  ActivityIndicator, Alert, Image, Modal, Platform, ScrollView, StyleSheet, Text,
+  ActivityIndicator, Alert, Image, Modal, Platform, ScrollView, StyleSheet, Switch, Text,
   TextInput, TouchableOpacity, View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -35,7 +37,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 type Tab = 'resume' | 'audiences' | 'documents' | 'finances';
 const TABS: { id: Tab; label: string; Icon: any }[] = [
   { id: 'resume',    label: 'Résumé',    Icon: FileText },
-  { id: 'audiences', label: 'Audiences', Icon: Calendar },
+  { id: 'audiences', label: 'Agenda',    Icon: Calendar },
   { id: 'documents', label: 'Documents', Icon: FileText },
   { id: 'finances',  label: 'Finances',  Icon: DollarSign },
 ];
@@ -70,21 +72,35 @@ export default function AffaireDetailScreen() {
 
   const [activeTab, setActiveTab] = useState<Tab>('resume');
 
-  // Modal Audience
+type EventCategory = 'Audience' | 'RDV Client' | 'RDV Associé' | 'Réunion' | 'Convocation';
+
+const AGENDA_CATEGORIES: { id: EventCategory; label: string; icon: string }[] = [
+  { id: 'Audience',     label: 'Audience',      icon: '⚖️' },
+  { id: 'RDV Client',   label: 'RDV Client',    icon: '👤' },
+  { id: 'RDV Associé',  label: 'RDV Associé',   icon: '🤝' },
+  { id: 'Réunion',      label: 'Réunion',       icon: '💼' },
+  { id: 'Convocation',  label: 'Convocation',   icon: '📜' },
+];
+
+  // Modal Agenda / Événement
   const [showAudModal, setShowAudModal] = useState(false);
-  const [audDate,  setAudDate]  = useState('');
-  const [audHeure, setAudHeure] = useState('');
-  const [audJur,   setAudJur]   = useState('');
-  const [audType,  setAudType]  = useState('');
-  const [audNotes, setAudNotes] = useState('');
-  const [savingAud, setSavingAud] = useState(false);
+  const [audCategory, setAudCategory]   = useState<EventCategory>('Audience');
+  const [audDate, setAudDate]           = useState('');
+  const [audHeure, setAudHeure]         = useState('09:00');
+  const [audJur, setAudJur]             = useState('');
+  const [audType, setAudType]           = useState('');
+  const [audNotes, setAudNotes]         = useState('');
+  const [audImportant, setAudImportant] = useState(false);
+  const [savingAud, setSavingAud]       = useState(false);
+  const [showAudPicker, setShowAudPicker] = useState(false);
 
   // Modal Édition Dossier
   const [showEditModal, setShowEditModal]     = useState(false);
-  const [editTitre, setEditTitre]           = useState('');
+  const [editTitre, setEditTitre]             = useState('');
   const [editJuridiction, setEditJuridiction] = useState('');
-  const [editNotes, setEditNotes]         = useState('');
-  const [savingEdit, setSavingEdit]       = useState(false);
+  const [editNotes, setEditNotes]             = useState('');
+  const [editStatut, setEditStatut]           = useState<DossierStatut>('En cours');
+  const [savingEdit, setSavingEdit]           = useState(false);
 
   // Modal Ajout Document (PDF, Word, Excel, Photo, Scan)
   const [showDocModal, setShowDocModal]       = useState(false);
@@ -143,6 +159,7 @@ export default function AffaireDetailScreen() {
     setEditTitre(dossier.titre);
     setEditJuridiction(dossier.juridiction ?? '');
     setEditNotes(dossier.notes ?? '');
+    setEditStatut(dossier.statut as DossierStatut);
     setShowEditModal(true);
   };
 
@@ -157,6 +174,7 @@ export default function AffaireDetailScreen() {
         titre: editTitre.trim(),
         juridiction: editJuridiction.trim() || undefined,
         notes: editNotes.trim() || undefined,
+        statut: editStatut,
         versionConnue: dossier.version,
       });
       setShowEditModal(false);
@@ -169,23 +187,24 @@ export default function AffaireDetailScreen() {
     }
   };
 
-  // ── Handlers Audiences ───────────────────────────────────────────────────
+  // ── Handlers Agenda / Événements ───────────────────────────────────────────
 
   const handleAddAudience = async () => {
-    if (!audDate) { Alert.alert('Erreur', 'La date est obligatoire.'); return; }
+    const targetDate = audDate.trim() || new Date().toISOString().slice(0, 10);
     setSavingAud(true);
     try {
       await createAud({
         dossierId,
-        dateAudience: audDate,
-        heure:        audHeure   || undefined,
-        juridiction:  audJur     || undefined,
-        typeAudience: audType    || undefined,
-        notes:        audNotes   || undefined,
+        dateAudience: targetDate,
+        heure:        audHeure.trim() || undefined,
+        juridiction:  audJur.trim()   || undefined,
+        typeAudience: audType.trim() ? `${audCategory} — ${audType.trim()}` : audCategory,
+        notes:        audImportant ? `[IMPORTANT] ${audNotes.trim()}`.trim() : (audNotes.trim() || undefined),
       });
       setShowAudModal(false);
-      setAudDate(''); setAudHeure(''); setAudJur(''); setAudType(''); setAudNotes('');
+      setAudDate(''); setAudHeure('09:00'); setAudJur(''); setAudType(''); setAudNotes(''); setAudCategory('Audience'); setAudImportant(false);
       refetchAud();
+      Alert.alert('Succès', 'Événement ajouté à l\'Agenda et synchronisé au Calendrier.');
     } catch (e) {
       Alert.alert('Erreur', extractErrorMessage(e));
     } finally {
@@ -203,6 +222,29 @@ export default function AffaireDetailScreen() {
         },
       },
     ]);
+  };
+
+  const handleDeleteDossier = () => {
+    Alert.alert(
+      'Supprimer le dossier d\'affaire',
+      `Êtes-vous sûr de vouloir supprimer définitivement le dossier "${dossier?.titre}" (${dossier?.numeroAffaire}) ? Cette action est irréversible.`,
+      [
+        { text: 'Annuler', style: 'cancel' },
+        {
+          text: 'Supprimer',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deleteDossier(dossierId);
+              Alert.alert('Succès', 'Le dossier d\'affaire a été supprimé.');
+              router.back();
+            } catch (e) {
+              Alert.alert('Erreur', extractErrorMessage(e));
+            }
+          },
+        },
+      ]
+    );
   };
 
   // ── Handlers Documents (Stockage/Drive, Camera, Scan) ──────────────────────
@@ -327,23 +369,29 @@ export default function AffaireDetailScreen() {
   const handleDownloadDoc = async (doc: DocItem) => {
     setDownloadingDoc(true);
     try {
-      const dirUri = FileSystem.Paths?.document?.uri || FileSystem.Paths?.cache?.uri || '';
-      const fileUri = `${dirUri}/${doc.nom}`;
+      const url   = getDocumentDownloadUrl(doc.id);
+      const token = await getAccessToken();
 
-      const fileContent = `CABINET MANAGER — DOCUMENT OFFICIEL\n---------------------------------------\nNom: ${doc.nom}\nType: ${doc.typeDocument || 'N/A'}\nDossier N°: ${doc.dossierId || dossierId}\nDate d'enregistrement: ${doc.createdAt}\nDescription: ${doc.description || 'Aucune observation'}\n---------------------------------------\nDocument valide produit par Cabinet Manager.`;
-      await FileSystem.writeAsStringAsync(fileUri, fileContent);
+      const safeName = doc.nom.replace(/[^a-zA-Z0-9._\-]/g, '_');
+      const localUri = (cacheDirectory ?? 'file:///') + safeName;
 
-      const isShareAvailable = await Sharing.isAvailableAsync();
-      if (isShareAvailable) {
-        await Sharing.shareAsync(fileUri, {
-          dialogTitle: `Télécharger / Enregistrer ${doc.nom}`,
-          mimeType: doc.nom.endsWith('.pdf') ? 'application/pdf' : doc.nom.endsWith('.docx') ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' : 'text/plain',
-        });
+      const result = await downloadAsync(url, localUri, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+
+      if (result.status === 200) {
+        const canShare = await Sharing.isAvailableAsync();
+        if (canShare) {
+          await Sharing.shareAsync(result.uri, {
+            mimeType:    doc.typeDocument ?? 'application/octet-stream',
+            dialogTitle: `Consulter ${doc.nom}`,
+          });
+        }
       } else {
-        Alert.alert('Téléchargement réussi', `Le document "${doc.nom}" a été téléchargé dans vos fichiers.`);
+        throw new Error(`Erreur serveur HTTP ${result.status}`);
       }
-    } catch (e) {
-      Alert.alert('Téléchargement', `Le fichier "${doc.nom}" est prêt dans votre gestionnaire de fichiers.`);
+    } catch (e: any) {
+      Alert.alert('Erreur', e?.message ?? 'Impossible d\'ouvrir le document.');
     } finally {
       setDownloadingDoc(false);
     }
@@ -385,10 +433,6 @@ export default function AffaireDetailScreen() {
               <View style={[s.statusBadge, { backgroundColor: statCol.bg }]}>
                 <Text style={[s.statusText, { color: statCol.text }]}>{dossier.statut}</Text>
               </View>
-              <TouchableOpacity style={s.editHeaderBtn} onPress={handleOpenEdit} activeOpacity={0.8}>
-                <Pencil color={C.amber400} size={14} />
-                <Text style={s.editHeaderBtnText}>Modifier</Text>
-              </TouchableOpacity>
             </View>
           </View>
         </View>
@@ -435,28 +479,55 @@ export default function AffaireDetailScreen() {
                 <Text style={s.notesText}>{dossier.notes}</Text>
               </View>
             ) : null}
-            {dossier.statut !== 'Cloture' && (
-              <TouchableOpacity style={s.clotureBtn} onPress={handleCloturer} activeOpacity={0.85}>
-                <Text style={s.clotureBtnText}>Clôturer le dossier</Text>
-              </TouchableOpacity>
-            )}
+            <TouchableOpacity
+              style={{
+                flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+                backgroundColor: C.amber500, borderRadius: 14, paddingVertical: 14, marginTop: 16,
+              }}
+              onPress={handleOpenEdit}
+              activeOpacity={0.85}
+            >
+              <Pencil color={C.gray900} size={18} />
+              <Text style={{ fontSize: 14, fontWeight: '700', color: C.gray900 }}>Modifier le dossier</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={{
+                flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+                backgroundColor: C.red50, borderWidth: 1, borderColor: C.red200,
+                borderRadius: 14, paddingVertical: 14, marginTop: 12, marginBottom: 10,
+              }}
+              onPress={handleDeleteDossier}
+              activeOpacity={0.85}
+            >
+              <Trash2 color={C.red600} size={18} />
+              <Text style={{ fontSize: 14, fontWeight: '700', color: C.red600 }}>Supprimer ce dossier d'affaire</Text>
+            </TouchableOpacity>
           </>
         )}
 
-        {/* ── AUDIENCES ── */}
+        {/* ── AGENDA / ÉVÉNEMENTS ── */}
         {activeTab === 'audiences' && (
           <>
             <View style={s.tabHeader}>
-              <Text style={s.tabHeaderTitle}>{audiences.length} audience(s)</Text>
+              <Text style={s.tabHeaderTitle}>{audiences.length} événement(s) au calendrier</Text>
               <TouchableOpacity style={s.addBtn} onPress={() => setShowAudModal(true)} activeOpacity={0.8}>
                 <Plus color={C.gray900} size={14} />
-                <Text style={s.addBtnText}>Planifier</Text>
+                <Text style={s.addBtnText}>+ Ajouter un événement</Text>
               </TouchableOpacity>
             </View>
             {audiences.length === 0 ? (
               <View style={s.empty}>
                 <Calendar color={C.gray400} size={40} />
-                <Text style={s.emptyText}>Aucune audience planifiée</Text>
+                <Text style={s.emptyText}>Aucun événement planifié pour ce dossier</Text>
+                <TouchableOpacity
+                  style={[s.addFactureBtn, { marginTop: 10, paddingHorizontal: 16, paddingVertical: 10 }]}
+                  onPress={() => setShowAudModal(true)}
+                  activeOpacity={0.8}
+                >
+                  <Plus color={C.gray900} size={16} />
+                  <Text style={[s.addFactureBtnText, { fontSize: 13 }]}>Ajouter au calendrier</Text>
+                </TouchableOpacity>
               </View>
             ) : audiences.map(a => {
               const d  = new Date(a.dateAudience);
@@ -579,7 +650,17 @@ export default function AffaireDetailScreen() {
         {activeTab === 'finances' && (
           <>
             <View style={s.card}>
-              <Text style={s.cardTitle}>Résumé financier</Text>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                <Text style={s.cardTitle}>Résumé financier</Text>
+                <TouchableOpacity
+                  style={s.addFactureBtn}
+                  onPress={() => router.push('/(tabs)/facturation')}
+                  activeOpacity={0.8}
+                >
+                  <Plus color={C.gray900} size={14} />
+                  <Text style={s.addFactureBtnText}>Créer une facture</Text>
+                </TouchableOpacity>
+              </View>
               {[
                 { label: 'Total facturé',     val: fmtM(totalFacture),  color: C.gray900 },
                 { label: 'Total encaissé',    val: fmtM(totalEncaisse), color: C.green600 },
@@ -602,6 +683,14 @@ export default function AffaireDetailScreen() {
               <View style={s.empty}>
                 <DollarSign color={C.gray400} size={40} />
                 <Text style={s.emptyText}>Aucune facture pour ce dossier</Text>
+                <TouchableOpacity
+                  style={[s.addFactureBtn, { marginTop: 10, paddingHorizontal: 16, paddingVertical: 10 }]}
+                  onPress={() => router.push('/(tabs)/facturation')}
+                  activeOpacity={0.8}
+                >
+                  <Plus color={C.gray900} size={16} />
+                  <Text style={[s.addFactureBtnText, { fontSize: 13 }]}>Créer la première facture</Text>
+                </TouchableOpacity>
               </View>
             ) : factures.map(f => (
               <View key={String(f.id)} style={s.card}>
@@ -743,13 +832,8 @@ export default function AffaireDetailScreen() {
                           <Text style={s.pdfDocNameHeading}>{selectedDoc.nom.toUpperCase()}</Text>
 
                           <Text style={s.pdfParagraphText}>
-                            {selectedDoc.description || `Enregistré sous la référence officielle du cabinet pour l'affaire n°${dossier.numeroAffaire}. Le présent acte atteste la constitution de conseil et le dépôt des pièces justificatives au greffe.`}
+                            {selectedDoc.description || `Document joint au dossier.`}
                           </Text>
-
-                          <View style={s.pdfStampBox}>
-                            <CheckCircle2 color={C.blue600} size={16} />
-                            <Text style={s.pdfStampText}>SCEAU CABINET MANAGER — CERTIFIÉ CONFORME</Text>
-                          </View>
                         </View>
                       </View>
                     )}
@@ -775,22 +859,34 @@ export default function AffaireDetailScreen() {
                   ) : null}
                 </View>
 
-                {/* Actions Téléchargement / Partage */}
-                <TouchableOpacity
-                  style={s.downloadActionBtn}
-                  onPress={() => handleDownloadDoc(selectedDoc)}
-                  disabled={downloadingDoc}
-                  activeOpacity={0.85}
-                >
-                  {downloadingDoc ? (
-                    <ActivityIndicator color={C.gray900} />
-                  ) : (
-                    <>
-                      <Download color={C.gray900} size={18} />
-                      <Text style={s.downloadActionText}>Télécharger & Enregistrer le Fichier</Text>
-                    </>
-                  )}
-                </TouchableOpacity>
+                {/* Actions Consultation & Téléchargement */}
+                <View style={{ gap: 10 }}>
+                  <TouchableOpacity
+                    style={s.downloadActionBtn}
+                    onPress={() => handleDownloadDoc(selectedDoc)}
+                    disabled={downloadingDoc}
+                    activeOpacity={0.85}
+                  >
+                    {downloadingDoc ? (
+                      <ActivityIndicator color={C.gray900} />
+                    ) : (
+                      <>
+                        <Eye color={C.gray900} size={18} />
+                        <Text style={s.downloadActionText}>Consulter</Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[s.downloadActionBtn, { backgroundColor: C.navy800 }]}
+                    onPress={() => handleDownloadDoc(selectedDoc)}
+                    disabled={downloadingDoc}
+                    activeOpacity={0.85}
+                  >
+                    <Download color={C.white} size={18} />
+                    <Text style={[s.downloadActionText, { color: C.white }]}>Télécharger</Text>
+                  </TouchableOpacity>
+                </View>
 
                 <TouchableOpacity style={s.cancelBtn} onPress={() => setShowViewDocModal(false)} activeOpacity={0.8}>
                   <Text style={s.cancelBtnText}>Fermer</Text>
@@ -829,6 +925,32 @@ export default function AffaireDetailScreen() {
                   placeholder="ex: TGI de Yaoundé, Cour d'Appel..."
                   placeholderTextColor={C.gray400}
                 />
+              </View>
+
+              <View style={{ marginBottom: 12 }}>
+                <Text style={s.fieldLabel}>Statut / Catégorie de l'affaire</Text>
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  {(['Ouvert', 'En cours', 'Cloture'] as DossierStatut[]).map(st => (
+                    <TouchableOpacity
+                      key={st}
+                      onPress={() => {
+                        if (st === 'Cloture') {
+                          handleCloturer();
+                        } else {
+                          setEditStatut(st);
+                        }
+                      }}
+                      style={[
+                        { flex: 1, paddingVertical: 10, alignItems: 'center', borderRadius: 10, backgroundColor: C.gray100, borderWidth: 1, borderColor: C.gray200 },
+                        editStatut === st && { backgroundColor: st === 'Cloture' ? C.red500 : C.amber500, borderColor: st === 'Cloture' ? C.red500 : C.amber500 },
+                      ]}
+                    >
+                      <Text style={[{ fontSize: 12, fontWeight: '600', color: C.gray700 }, editStatut === st && { color: C.white, fontWeight: '700' }]}>
+                        {st === 'Cloture' ? 'Clôturer' : st}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
               </View>
 
               <View style={{ marginBottom: 12 }}>
@@ -975,33 +1097,110 @@ export default function AffaireDetailScreen() {
         </TouchableOpacity>
       </Modal>
 
-      {/* ── MODAL AUDIENCE ── */}
+      {/* ── MODAL AGENDA / ÉVÉNEMENT ── */}
       <Modal visible={showAudModal} transparent animationType="slide" onRequestClose={() => setShowAudModal(false)}>
         <TouchableOpacity style={s.overlay} activeOpacity={1} onPress={() => setShowAudModal(false)}>
           <TouchableOpacity style={s.sheet} activeOpacity={1} onPress={() => {}}>
             <View style={s.handle} />
-            <Text style={s.sheetTitle}>Planifier une audience</Text>
-            <ScrollView showsVerticalScrollIndicator={false}>
-              {[
-                { label: 'Date (YYYY-MM-DD) *', val: audDate,  set: setAudDate,  placeholder: '2026-09-15' },
-                { label: 'Heure',               val: audHeure, set: setAudHeure, placeholder: '09:00' },
-                { label: "Type d'audience",     val: audType,  set: setAudType,  placeholder: 'Plaidoirie, Délibéré…' },
-                { label: 'Juridiction',         val: audJur,   set: setAudJur,   placeholder: 'TGI de Yaoundé' },
-                { label: 'Notes',               val: audNotes, set: setAudNotes, placeholder: 'Observations…' },
-              ].map(({ label, val, set, placeholder }) => (
-                <View key={label} style={{ marginBottom: 12 }}>
-                  <Text style={s.fieldLabel}>{label}</Text>
-                  <TextInput
-                    style={s.fieldInput}
-                    value={val}
-                    onChangeText={set}
-                    placeholder={placeholder}
-                    placeholderTextColor={C.gray400}
-                  />
+            <Text style={s.sheetTitle}>Ajouter au calendrier de l'affaire</Text>
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+              
+              {/* Catégories d'événements */}
+              <Text style={s.fieldLabel}>Type d'événement *</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 14 }} contentContainerStyle={{ gap: 8 }}>
+                {AGENDA_CATEGORIES.map(cat => (
+                  <TouchableOpacity
+                    key={cat.id}
+                    onPress={() => setAudCategory(cat.id)}
+                    style={[
+                      s.chipBtn,
+                      audCategory === cat.id && s.chipBtnActive,
+                    ]}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={{ fontSize: 12 }}>{cat.icon} <Text style={[s.chipText, audCategory === cat.id && s.chipTextActive]}>{cat.label}</Text></Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+
+              {/* Pop-up Sélecteur de Date & Heure */}
+              <View style={{ marginBottom: 14 }}>
+                <Text style={s.fieldLabel}>Date & Heure de l'événement *</Text>
+                <TouchableOpacity
+                  style={{
+                    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+                    backgroundColor: C.amber50, borderWidth: 1.5, borderColor: C.amber400,
+                    borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12,
+                  }}
+                  onPress={() => setShowAudPicker(true)}
+                  activeOpacity={0.8}
+                >
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    <Calendar color={C.amber600} size={18} />
+                    <Text style={{ fontSize: 14, fontWeight: '700', color: C.gray900 }}>
+                      {audDate || new Date().toISOString().slice(0, 10)}
+                    </Text>
+                  </View>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: C.white, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, borderWidth: 1, borderColor: C.amber200 }}>
+                    <Clock color={C.amber600} size={14} />
+                    <Text style={{ fontSize: 13, fontWeight: '700', color: C.amber900 }}>
+                      {audHeure || '09:00'}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              </View>
+
+              <View style={{ marginBottom: 12 }}>
+                <Text style={s.fieldLabel}>Intitulé / Sujet de l'événement</Text>
+                <TextInput
+                  style={s.fieldInput}
+                  value={audType}
+                  onChangeText={setAudType}
+                  placeholder="ex: Plaidoirie, Délibéré, Entretien..."
+                  placeholderTextColor={C.gray400}
+                />
+              </View>
+
+              <View style={{ marginBottom: 12 }}>
+                <Text style={s.fieldLabel}>Lieu / Juridiction</Text>
+                <TextInput
+                  style={s.fieldInput}
+                  value={audJur}
+                  onChangeText={setAudJur}
+                  placeholder="ex: TGI de Yaoundé - Salle 2"
+                  placeholderTextColor={C.gray400}
+                />
+              </View>
+
+              <View style={{ marginBottom: 12 }}>
+                <Text style={s.fieldLabel}>Notes & Observations</Text>
+                <TextInput
+                  style={[s.fieldInput, { height: 75, textAlignVertical: 'top' }]}
+                  value={audNotes}
+                  onChangeText={setAudNotes}
+                  multiline
+                  numberOfLines={3}
+                  placeholder="Précisions sur les pièces ou consignes..."
+                  placeholderTextColor={C.gray400}
+                />
+              </View>
+
+              {/* Switch Marquer comme Important */}
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, backgroundColor: C.gray50, padding: 12, borderRadius: 12 }}>
+                <View style={{ flex: 1, paddingRight: 8 }}>
+                  <Text style={{ fontSize: 13, fontWeight: '700', color: C.gray900 }}>⭐️ Marquer comme Important</Text>
+                  <Text style={{ fontSize: 11, color: C.gray500 }}>Sera mis en évidence en JAUNE sur le calendrier</Text>
                 </View>
-              ))}
+                <Switch
+                  value={audImportant}
+                  onValueChange={setAudImportant}
+                  trackColor={{ false: C.gray300, true: C.amber500 }}
+                  thumbColor={C.white}
+                />
+              </View>
+
               <TouchableOpacity style={[s.saveBtn, savingAud && { opacity: 0.6 }]} onPress={handleAddAudience} disabled={savingAud} activeOpacity={0.85}>
-                {savingAud ? <ActivityIndicator color={C.gray900} /> : <Text style={s.saveBtnText}>Enregistrer l'audience</Text>}
+                {savingAud ? <ActivityIndicator color={C.gray900} /> : <Text style={s.saveBtnText}>Enregistrer au calendrier</Text>}
               </TouchableOpacity>
               <TouchableOpacity style={s.cancelBtn} onPress={() => setShowAudModal(false)} activeOpacity={0.8}>
                 <Text style={s.cancelBtnText}>Annuler</Text>
@@ -1010,6 +1209,17 @@ export default function AffaireDetailScreen() {
           </TouchableOpacity>
         </TouchableOpacity>
       </Modal>
+
+      {/* Pop-up Calendrier & Choix d'heure (Dates passées bloquées) */}
+      <DateTimePickerModal
+        visible={showAudPicker}
+        onClose={() => setShowAudPicker(false)}
+        selectedDateStr={audDate || new Date().toISOString().slice(0, 10)}
+        selectedTimeStr={audHeure || '09:00'}
+        onSelectDate={setAudDate}
+        onSelectTime={setAudHeure}
+        minDateToday={true}
+      />
     </View>
   );
 }
@@ -1140,4 +1350,6 @@ const s = StyleSheet.create({
   saveBtnText:    { fontSize: 15, fontWeight: '600', color: C.gray900 },
   cancelBtn:      { borderWidth: 1, borderColor: C.gray200, borderRadius: 14, paddingVertical: 14, alignItems: 'center' },
   cancelBtnText:  { fontSize: 14, fontWeight: '500', color: C.gray500 },
+  addFactureBtn:  { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: C.amber500, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8 },
+  addFactureBtnText: { fontSize: 12, fontWeight: '700', color: C.gray900 },
 });

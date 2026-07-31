@@ -293,6 +293,22 @@ export class DossiersService {
    * une séquence Postgres dédiée par cabinet/année (SEQUENCE + fonction SQL)
    * pour une garantie d'unicité atomique côté base de données.
    */
+  async delete(id: number, user: AuthenticatedUser, scope: PermissionScope): Promise<void> {
+    const dossier = await this.findOne(id, user, scope);
+    dossier.deletedAt = new Date();
+    await this.dossierRepository.save(dossier);
+
+    await this.journalService.enregistrer({
+      cabinetId: user.cabinetId,
+      utilisateurId: user.id,
+      action: 'dossier.delete',
+      entiteType: 'dossier',
+      entiteId: id,
+      donneesAvant: { ...dossier } as any,
+      donneesApres: null,
+    });
+  }
+
   private async genererNumeroAffaire(cabinetId: number): Promise<string> {
     const annee = new Date().getFullYear();
     const debutAnnee = new Date(annee, 0, 1);

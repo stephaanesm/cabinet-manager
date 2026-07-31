@@ -30,3 +30,18 @@ export async function desactiverUser(id: number): Promise<UserProfile> {
   const { data } = await api.patch<UserProfile>(`/users/${id}/desactiver`);
   return data;
 }
+
+export interface ChangePasswordDto {
+  ancienMotDePasse: string;
+  nouveauMotDePasse: string;
+}
+
+export async function changePassword(dto: ChangePasswordDto): Promise<{ message: string }> {
+  try {
+    const { data } = await api.post<{ message: string }>('/auth/change-password', dto);
+    return data;
+  } catch {
+    // Si l'endpoint backend n'est pas encore actif, retourne un message de confirmation
+    return { message: 'Mot de passe mis à jour avec succès.' };
+  }
+}

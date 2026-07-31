@@ -18,6 +18,7 @@ import { useAudiences } from '@/hooks/useAudiences';
 import { useDossiers } from '@/hooks/useDossiers';
 import { extractErrorMessage } from '@/lib/api';
 import { Audience } from '@/services/audiences.service';
+import { DateTimePickerModal } from '@/components/DateTimePickerModal';
 import { useRouter } from 'expo-router';
 import {
   AlertCircle, Briefcase, Calendar, ChevronLeft, ChevronRight,
@@ -65,6 +66,7 @@ export default function CalendrierScreen() {
   const [evtNotes, setEvtNotes]           = useState('');
   const [evtImportant, setEvtImportant]   = useState(false);
   const [savingEvt, setSavingEvt]         = useState(false);
+  const [showPicker, setShowPicker]       = useState(false);
 
   // Chargement des audiences & des dossiers
   const { audiences, isLoading, error, refetch, create: createAudience } = useAudiences({ lazy: false });
@@ -402,7 +404,7 @@ export default function CalendrierScreen() {
             <View style={s.sheetHandle} />
             <Text style={s.sheetTitle}>Ajouter au calendrier</Text>
 
-            <ScrollView showsVerticalScrollIndicator={false}>
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
 
               {/* Sélection Catégorie */}
               <Text style={s.fieldLabel}>Type d'événement *</Text>
@@ -426,28 +428,31 @@ export default function CalendrierScreen() {
                 ))}
               </ScrollView>
 
-              {/* Date & Heure */}
-              <View style={{ flexDirection: 'row', gap: 10, marginBottom: 12 }}>
-                <View style={{ flex: 1 }}>
-                  <Text style={s.fieldLabel}>Date (YYYY-MM-DD) *</Text>
-                  <TextInput
-                    style={s.fieldInput}
-                    value={evtDateStr}
-                    onChangeText={setEvtDateStr}
-                    placeholder="2026-09-20"
-                    placeholderTextColor={C.gray400}
-                  />
-                </View>
-                <View style={{ width: 110 }}>
-                  <Text style={s.fieldLabel}>Heure</Text>
-                  <TextInput
-                    style={s.fieldInput}
-                    value={evtHeure}
-                    onChangeText={setEvtHeure}
-                    placeholder="09:00"
-                    placeholderTextColor={C.gray400}
-                  />
-                </View>
+              {/* Pop-up Sélecteur de Date & Heure */}
+              <View style={{ marginBottom: 14 }}>
+                <Text style={s.fieldLabel}>Date & Heure de l'événement *</Text>
+                <TouchableOpacity
+                  style={{
+                    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+                    backgroundColor: C.amber50, borderWidth: 1.5, borderColor: C.amber400,
+                    borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12,
+                  }}
+                  onPress={() => setShowPicker(true)}
+                  activeOpacity={0.8}
+                >
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    <Calendar color={C.amber600} size={18} />
+                    <Text style={{ fontSize: 14, fontWeight: '700', color: C.gray900 }}>
+                      {evtDateStr || 'Choisir une date'}
+                    </Text>
+                  </View>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: C.white, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, borderWidth: 1, borderColor: C.amber200 }}>
+                    <Clock color={C.amber600} size={14} />
+                    <Text style={{ fontSize: 13, fontWeight: '700', color: C.amber900 }}>
+                      {evtHeure || '09:00'}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
               </View>
 
               {/* Titre / Objet */}
@@ -523,15 +528,9 @@ export default function CalendrierScreen() {
               </View>
 
               {/* Bouton de Sauvegarde */}
-              <TouchableOpacity
-                style={[s.saveBtn, savingEvt && { opacity: 0.6 }]}
-                onPress={handleSaveEvent}
-                disabled={savingEvt}
-                activeOpacity={0.85}
-              >
+              <TouchableOpacity style={[s.saveBtn, savingEvt && { opacity: 0.6 }]} onPress={handleSaveEvent} disabled={savingEvt} activeOpacity={0.85}>
                 {savingEvt ? <ActivityIndicator color={C.gray900} /> : <Text style={s.saveBtnText}>Enregistrer l'événement</Text>}
               </TouchableOpacity>
-
               <TouchableOpacity style={s.cancelBtn} onPress={() => setShowAddModal(false)} activeOpacity={0.8}>
                 <Text style={s.cancelBtnText}>Annuler</Text>
               </TouchableOpacity>
@@ -539,6 +538,17 @@ export default function CalendrierScreen() {
           </TouchableOpacity>
         </TouchableOpacity>
       </Modal>
+
+      {/* Pop-up Calendrier & Choix d'heure interactif (Date passée bloquée) */}
+      <DateTimePickerModal
+        visible={showPicker}
+        onClose={() => setShowPicker(false)}
+        selectedDateStr={evtDateStr}
+        selectedTimeStr={evtHeure}
+        onSelectDate={setEvtDateStr}
+        onSelectTime={setEvtHeure}
+        minDateToday={true}
+      />
     </View>
   );
 }

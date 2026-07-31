@@ -1,5 +1,5 @@
 import { Tabs } from 'expo-router';
-import { LayoutDashboard, Briefcase, Users, FileText, Calendar, Brain, Receipt } from 'lucide-react-native';
+import { LayoutDashboard, Briefcase, Users, Calendar, Brain, Receipt, FolderOpen } from 'lucide-react-native';
 import { AppColors as C } from '@/constants/theme';
 
 export default function TabsLayout() {
@@ -42,6 +42,14 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen
+        name="documents"
+        options={{
+          title: 'Documents',
+          tabBarLabel: 'Documents',
+          tabBarIcon: ({ color, size }) => <FolderOpen color={color} size={size} />,
+        }}
+      />
+      <Tabs.Screen
         name="audiences"
         options={{
           title: 'Calendrier',
@@ -49,19 +57,18 @@ export default function TabsLayout() {
           tabBarIcon: ({ color, size }) => <Calendar color={color} size={size} />,
         }}
       />
-
       <Tabs.Screen
         name="facturation"
         options={{
+          href: null,
           title: 'Facturation',
-          tabBarIcon: ({ color, size }) => <Receipt color={color} size={size} />,
         }}
       />
       <Tabs.Screen
         name="assistant-ia"
         options={{
+          href: null,
           title: 'IA',
-          tabBarIcon: ({ color, size }) => <Brain color={color} size={size} />,
         }}
       />
     </Tabs>

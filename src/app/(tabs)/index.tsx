@@ -1,9 +1,10 @@
 /**
  * src/app/(tabs)/index.tsx
  * Tableau de bord Executive avec :
- *  - Calendrier Journalier (Agenda du Jour & Créneaux Horaires)
+ *  - Cloche de Notifications 🔔 dans l'en-tête (à côté de déconnexion) ouvrant une Modal Pop-up interactive
+ *  - Calendrier Journalier (Agenda du Jour avec données réelles BDD)
  *  - Rappels & Alertes Intelligentes (Factures en retard, Échéances)
- *  - Raccourcis Métier (Nouveau Dossier, Nouvelle Facture, Audience, IA)
+ *  - Raccourcis Métier (Nouveau Dossier, Créer Facture, Calendrier, Fiche Client)
  */
 
 import { AppColors as C } from '@/constants/theme';
@@ -11,24 +12,32 @@ import { useAudiences } from '@/hooks/useAudiences';
 import { useAuth } from '@/hooks/useAuth';
 import { useDossiers } from '@/hooks/useDossiers';
 import { useFactures } from '@/hooks/useFactures';
+import { createFacture, deleteFacture, Facture, getSoldeRestant } from '@/services/facturation.service';
+import {
+  getNotifications, marquerNotificationCommeLue, marquerToutesNotificationsCommeLues,
+  NotificationItem,
+} from '@/services/notifications.service';
 import { useRouter } from 'expo-router';
 import {
   AlertTriangle, ArrowUpRight, BarChart3, Bell, Brain, Briefcase,
-  Calendar as CalendarIcon, CheckCircle2, Clock, DollarSign, FileText,
-  LayoutDashboard, LogOut, Plus, Receipt, ShieldCheck, Sparkles, TrendingUp, Users, Zap,
+  Calendar as CalendarIcon, CheckCheck, CheckCircle2, Clock, DollarSign, FileText,
+  Info, LayoutDashboard, LogOut, Plus, Receipt, ShieldCheck, Sparkles, Trash2, TrendingUp, Users, X, Zap,
 } from 'lucide-react-native';
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { extractErrorMessage } from '@/lib/api';
+import { checkUpcomingEventReminders } from '@/lib/notificationsManager';
 import {
-  ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, View,
+  ActivityIndicator, Alert, Modal, RefreshControl, ScrollView, StatusBar, StyleSheet, Text,
+  TextInput, TouchableOpacity, View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-type DashboardTab = 'overview' | 'agenda' | 'kpis';
+type DashboardTab = 'overview' | 'agenda' | 'facturation';
 
 const DASHBOARD_TABS: { id: DashboardTab; label: string; Icon: any }[] = [
-  { id: 'overview', label: "Vue d'ensemble", Icon: LayoutDashboard },
-  { id: 'agenda',   label: 'Agenda du Jour',   Icon: CalendarIcon },
-  { id: 'kpis',     label: 'Performances',    Icon: BarChart3 },
+  { id: 'overview',    label: "Vue d'ensemble", Icon: LayoutDashboard },
+  { id: 'agenda',      label: 'Agenda du Jour', Icon: CalendarIcon },
+  { id: 'facturation', label: 'Facturation',    Icon: Receipt },
 ];
 
 export default function DashboardScreen() {
@@ -36,23 +45,162 @@ export default function DashboardScreen() {
   const { user, logout } = useAuth();
   const [activeTab, setActiveTab] = useState<DashboardTab>('overview');
 
+  // Modal Pop-up Notifications
+  const [showNotifPopUp, setShowNotifPopUp] = useState(false);
+  const [notifs, setNotifs]                 = useState<NotificationItem[]>([]);
+  const [nonLues, setNonLues]               = useState(0);
+  const [loadingNotifs, setLoadingNotifs]   = useState(false);
+
   // Backend Data Hooks
   const { dossiers }  = useDossiers({ pageSize: 50 });
   const { audiences } = useAudiences({ pageSize: 50 });
-  const { factures, totalFacture, totalEncaisse, totalImpaye } = useFactures();
+  const {
+    factures, totalFacture, totalEncaisse, totalImpaye, tauxRecouvrement,
+    refetch: refetchFactures, create: createFacture,
+  } = useFactures();
 
-  // Metric Calculations
+  // Modal Nouvelle Facture (Page d'accueil)
+  const [showFactureModal, setShowFactureModal] = useState(false);
+  const [factDossierId, setFactDossierId]     = useState<number | undefined>(undefined);
+  const [factMontantHt, setFactMontantHt]     = useState('');
+  const [factTva, setFactTva]                 = useState('19.25');
+  const [factEcheance, setFactEcheance]       = useState('');
+  const [factDesc, setFactDesc]               = useState('');
+  const [creatingFact, setCreatingFact]       = useState(false);
+
+  // Chargement des notifications réelles du backend (silencieux si indisponible)
+  const fetchNotifs = useCallback(async () => {
+    setLoadingNotifs(true);
+    try {
+      const res = await getNotifications();
+      setNotifs(res.data);
+      setNonLues(res.nonLuesCount);
+    } catch (e: any) {
+      // 404 = table notifications pas encore migrée, ou endpoint indisponible
+      // On ne bloque pas l'UI : la cloche reste accessible mais vide
+      const status = e?.response?.status;
+      if (status !== 404 && status !== 401) {
+        console.log('[Notifications] Erreur de chargement (status:', status, ')');
+      }
+      setNotifs([]);
+      setNonLues(0);
+    } finally {
+      setLoadingNotifs(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchNotifs();
+  }, [fetchNotifs]);
+
+  const handleMarkAllRead = async () => {
+    try {
+      await marquerToutesNotificationsCommeLues();
+      setNotifs(prev => prev.map(n => ({ ...n, lu: true })));
+      setNonLues(0);
+    } catch (e) {
+      console.log('Error mark all read:', e);
+    }
+  };
+
+  const handleMarkRead = async (id: number) => {
+    try {
+      await marquerNotificationCommeLue(id);
+      setNotifs(prev => prev.map(n => n.id === id ? { ...n, lu: true } : n));
+      setNonLues(p => Math.max(0, p - 1));
+    } catch (e) {
+      console.log('Error mark read:', e);
+    }
+  };
+
+  // Handlers Création Facture (Page Accueil)
+  const handleOpenFactureModal = () => {
+    if (dossiers.length > 0) setFactDossierId(Number(dossiers[0].id));
+    setFactMontantHt('');
+    setFactTva('19.25');
+    const defaultEch = new Date();
+    defaultEch.setDate(defaultEch.getDate() + 30);
+    setFactEcheance(defaultEch.toISOString().slice(0, 10));
+    setFactDesc('');
+    setShowFactureModal(true);
+  };
+
+  const handleCreateFacture = async () => {
+    if (!factMontantHt || isNaN(Number(factMontantHt)) || Number(factMontantHt) <= 0) {
+      Alert.alert('Erreur', 'Veuillez saisir un montant Hors Taxe valide.');
+      return;
+    }
+    const dossierSelected = dossiers.find(d => Number(d.id) === Number(factDossierId));
+    if (!dossierSelected) {
+      Alert.alert('Erreur', 'Veuillez sélectionner un dossier.');
+      return;
+    }
+
+    setCreatingFact(true);
+    try {
+      await createFacture({
+        dossierId: Number(dossierSelected.id),
+        clientId: Number(dossierSelected.clientId),
+        montantHt: Number(factMontantHt),
+        tauxTva: Number(factTva) || 19.25,
+        dateEcheance: factEcheance || undefined,
+        description: factDesc.trim() || undefined,
+      });
+
+      setShowFactureModal(false);
+      refetchFactures();
+      Alert.alert('Succès', 'Facture créée avec succès.');
+    } catch (e) {
+      Alert.alert('Erreur', extractErrorMessage(e));
+    } finally {
+      setCreatingFact(false);
+    }
+  };
+
+  const handleDeleteFacture = (f: Facture) => {
+    Alert.alert(
+      'Supprimer la facture',
+      `Êtes-vous sûr de vouloir supprimer définitivement la facture ${f.numeroFacture} ? Cette action est irréversible.`,
+      [
+        { text: 'Annuler', style: 'cancel' },
+        {
+          text: 'Supprimer',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deleteFacture(f.id);
+              refetchFactures();
+              Alert.alert('Succès', 'La facture a été supprimée.');
+            } catch (e) {
+              Alert.alert('Erreur', extractErrorMessage(e));
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const affairesActives = dossiers.filter(
     d => d.statut === 'Ouvert' || d.statut === 'En cours'
   ).length;
-
   const affairesCloturees = dossiers.filter(d => d.statut === 'Cloture').length;
-
   const facturesRetard = factures.filter(f => f.statut === 'en_retard');
 
-  // Agenda / Audiences du jour
   const todayStr = new Date().toISOString().slice(0, 10);
   const todayAudiences = audiences.filter(a => a.dateAudience?.startsWith(todayStr));
+
+  // Vérification automatique des rappels 30 min avant les événements
+  useEffect(() => {
+    if (audiences.length > 0) {
+      const remList = audiences.map(a => ({
+        id: a.id,
+        titre: a.typeAudience || 'Événement Cabinet',
+        dateStr: a.dateAudience ? a.dateAudience.slice(0, 10) : '',
+        heureStr: a.heure || '09:00',
+      }));
+      checkUpcomingEventReminders(remList);
+    }
+  }, [audiences]);
 
   const affairesRecentes = dossiers
     .filter(d => d.statut === 'Ouvert' || d.statut === 'En cours')
@@ -65,7 +213,7 @@ export default function DashboardScreen() {
       <SafeAreaView style={s.safe} edges={['top']}>
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 100 }}>
 
-          {/* ── En-tête Executive ── */}
+          {/* ── En-tête Executive avec Cloche Notifications & Déconnexion à droite ── */}
           <View style={s.header}>
             <View style={{ flex: 1 }}>
               <Text style={s.headerGreeting}>Cabinet d'Avocats</Text>
@@ -79,7 +227,23 @@ export default function DashboardScreen() {
               <TouchableOpacity style={s.iconBtn} onPress={() => router.push('/assistant-ia')}>
                 <Brain color={C.amber400} size={20} />
               </TouchableOpacity>
-              <TouchableOpacity style={s.logoutBtn} onPress={logout}>
+
+              {/* 🔔 Icône Cloche Notifications Pop-up */}
+              <TouchableOpacity
+                style={s.bellBtn}
+                onPress={() => { fetchNotifs(); setShowNotifPopUp(true); }}
+                activeOpacity={0.8}
+              >
+                <Bell color={C.white} size={20} />
+                {nonLues > 0 && (
+                  <View style={s.badge}>
+                    <Text style={s.badgeText}>{nonLues > 9 ? '9+' : nonLues}</Text>
+                  </View>
+                )}
+              </TouchableOpacity>
+
+              {/* Bouton Déconnexion */}
+              <TouchableOpacity style={s.logoutBtn} onPress={logout} activeOpacity={0.8}>
                 <LogOut color={C.red400} size={18} />
               </TouchableOpacity>
             </View>
@@ -130,7 +294,7 @@ export default function DashboardScreen() {
                 </View>
               </View>
 
-              {/* 🔔 BLOC RAPPELS & RAPPELS IMPORTANT (Factures en retard / Audiences) */}
+              {/* 🔔 BLOC RAPPELS & NOTIFICATIONS IMPORTANTES */}
               <Text style={s.sectionTitle}>Rappels & Notifications</Text>
               <View style={{ gap: 8 }}>
                 {facturesRetard.length > 0 && (
@@ -160,7 +324,7 @@ export default function DashboardScreen() {
                 </View>
               </View>
 
-              {/* Actions Rapides Métier (Inclus : Nouvelle Facture) */}
+              {/* Actions Rapides Métier */}
               <Text style={s.sectionTitle}>Actions rapides</Text>
               <View style={s.quickActionsGrid}>
                 <TouchableOpacity
@@ -242,7 +406,7 @@ export default function DashboardScreen() {
             </View>
           )}
 
-          {/* ── TAB 2 : CALENDRIER JOURNALIER (AGENDA DU JOUR) ── */}
+          {/* ── TAB 2 : CALENDRIER JOURNALIER (DONNÉES RÉELLES) ── */}
           {activeTab === 'agenda' && (
             <View style={s.tabContent}>
               <View style={s.agendaHeaderBox}>
@@ -257,62 +421,292 @@ export default function DashboardScreen() {
                 </TouchableOpacity>
               </View>
 
-              {/* Grille Créneaux Horaires du Jour */}
-              <View style={s.timeSlotGrid}>
-                {[
-                  { time: '08:30', title: 'Préparation des pièces & dossier de plaidoirie', type: 'Travail Cabinet', color: C.blue600, bg: C.blue50 },
-                  { time: '10:00', title: 'Audience devant la Cour d\'Appel (Chambre Civile)', type: 'Audience', color: C.amber600, bg: C.amber50 },
-                  { time: '12:30', title: 'Rendez-vous Client — Consultation juridique', type: 'RDV Client', color: C.purple600, bg: C.purple50 },
-                  { time: '15:00', title: 'Réunion d\'associés & Rédaction de conclusions', type: 'Réunion', color: C.green600, bg: C.green50 },
-                ].map((slot, i) => (
-                  <View key={i} style={s.timeSlotRow}>
-                    <View style={s.timeSlotTimeWrap}>
-                      <Text style={s.timeSlotTime}>{slot.time}</Text>
-                      <Clock color={C.gray400} size={12} />
-                    </View>
-                    <View style={[s.timeSlotCard, { backgroundColor: slot.bg, borderLeftColor: slot.color, borderLeftWidth: 4 }]}>
-                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <Text style={[s.timeSlotType, { color: slot.color }]}>{slot.type}</Text>
+              {/* Données réelles des événements d'aujourd'hui */}
+              {todayAudiences.length === 0 ? (
+                <View style={s.emptyCard}>
+                  <CalendarIcon color={C.gray400} size={36} />
+                  <Text style={s.emptyText}>Aucune audience ou rendez-vous prévu aujourd'hui</Text>
+                  <TouchableOpacity style={s.agendaAddBtn} onPress={() => router.push('/audiences')}>
+                    <Plus color={C.gray900} size={14} />
+                    <Text style={s.agendaAddBtnText}>Planifier un événement</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <View style={s.timeSlotGrid}>
+                  {todayAudiences.map((aud) => {
+                    const timeStr = aud.heure || '09:00';
+                    const isTenue = aud.statut === 'tenue';
+                    const cardBg = isTenue ? C.green50 : C.amber50;
+                    const cardColor = isTenue ? C.green600 : C.amber600;
+                    return (
+                      <View key={String(aud.id)} style={s.timeSlotRow}>
+                        <View style={s.timeSlotTimeWrap}>
+                          <Text style={s.timeSlotTime}>{timeStr}</Text>
+                          <Clock color={C.gray400} size={12} />
+                        </View>
+                        <View style={[s.timeSlotCard, { backgroundColor: cardBg, borderLeftColor: cardColor, borderLeftWidth: 4 }]}>
+                          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <Text style={[s.timeSlotType, { color: cardColor }]}>{aud.typeAudience || 'Audience'}</Text>
+                            <Text style={{ fontSize: 10, fontWeight: '700', color: cardColor }}>{aud.statut.toUpperCase()}</Text>
+                          </View>
+                          <Text style={s.timeSlotTitle}>{aud.juridiction || 'Tribunal de Grande Instance'}</Text>
+                          {aud.notes ? <Text style={{ fontSize: 11, color: C.gray600, marginTop: 2 }}>{aud.notes}</Text> : null}
+                        </View>
                       </View>
-                      <Text style={s.timeSlotTitle}>{slot.title}</Text>
-                    </View>
-                  </View>
-                ))}
-              </View>
+                    );
+                  })}
+                </View>
+              )}
             </View>
           )}
 
-          {/* ── TAB 3 : PERFORMANCES & KPIS FINANCIERS ── */}
-          {activeTab === 'kpis' && (
+          {/* ── TAB 3 : FACTURATION & ENCAISSEMENTS ── */}
+          {activeTab === 'facturation' && (
             <View style={s.tabContent}>
-              <View style={s.statsCard}>
-                <Text style={s.statsCardTitle}>Statistiques Financières du Cabinet</Text>
-                <View style={s.statRow}>
-                  <Text style={s.statLabel}>Total honoraires facturés :</Text>
-                  <Text style={s.statValue}>{new Intl.NumberFormat('fr-FR').format(Math.round(totalFacture))} FCFA</Text>
+              <View style={s.agendaHeaderBox}>
+                <Receipt color={C.green600} size={20} />
+                <View style={{ flex: 1 }}>
+                  <Text style={s.agendaHeaderTitle}>Facturation & Encaissements</Text>
+                  <Text style={s.agendaHeaderSub}>Honoraires, suivi des paiements et relances</Text>
                 </View>
-                <View style={s.statRow}>
-                  <Text style={s.statLabel}>Montant encaissé :</Text>
-                  <Text style={[s.statValue, { color: C.green600 }]}>{new Intl.NumberFormat('fr-FR').format(Math.round(totalEncaisse))} FCFA</Text>
+                <TouchableOpacity style={s.agendaAddBtn} onPress={handleOpenFactureModal} activeOpacity={0.8}>
+                  <Plus color={C.gray900} size={14} />
+                  <Text style={s.agendaAddBtnText}>Nouvelle Facture</Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* KPIs Financiers */}
+              <View style={s.kpiGrid}>
+                <View style={[s.kpiCard, { borderLeftColor: C.gray900 }]}>
+                  <Text style={s.kpiLabel}>Total facturé</Text>
+                  <Text style={[s.kpiVal, { fontSize: 16 }]}>{totalFacture > 0 ? `${(totalFacture / 1_000_000).toFixed(1)}M` : '0'} FCFA</Text>
                 </View>
-                <View style={s.statRow}>
-                  <Text style={s.statLabel}>Reste à percevoir :</Text>
-                  <Text style={[s.statValue, { color: C.red600 }]}>{new Intl.NumberFormat('fr-FR').format(Math.round(totalImpaye))} FCFA</Text>
+
+                <View style={[s.kpiCard, { borderLeftColor: C.green500 }]}>
+                  <Text style={s.kpiLabel}>Total encaissé</Text>
+                  <Text style={[s.kpiVal, { fontSize: 16, color: C.green600 }]}>{totalEncaisse > 0 ? `${(totalEncaisse / 1_000_000).toFixed(1)}M` : '0'} FCFA</Text>
+                </View>
+
+                <View style={[s.kpiCard, { borderLeftColor: C.red500 }]}>
+                  <Text style={s.kpiLabel}>Reste à percevoir</Text>
+                  <Text style={[s.kpiVal, { fontSize: 16, color: C.red600 }]}>{totalImpaye > 0 ? `${(totalImpaye / 1_000_000).toFixed(1)}M` : '0'} FCFA</Text>
+                </View>
+
+                <View style={[s.kpiCard, { borderLeftColor: C.amber500 }]}>
+                  <Text style={s.kpiLabel}>Taux recouvrement</Text>
+                  <Text style={[s.kpiVal, { fontSize: 16, color: C.amber600 }]}>{tauxRecouvrement}%</Text>
                 </View>
               </View>
 
-              <TouchableOpacity style={s.aiAssistantBanner} onPress={() => router.push('/assistant-ia')} activeOpacity={0.85}>
-                <Sparkles color={C.amber400} size={22} />
-                <View style={{ flex: 1 }}>
-                  <Text style={s.aiTitle}>Assistant IA Juridique</Text>
-                  <Text style={s.aiSub}>Analyse de jurisprudence & aide à la rédaction de conclusions</Text>
+              {/* Liste des Factures */}
+              {factures.length === 0 ? (
+                <View style={s.emptyCard}>
+                  <DollarSign color={C.gray400} size={36} />
+                  <Text style={s.emptyText}>Aucune facture d'honoraires enregistrée</Text>
+                  <TouchableOpacity style={s.agendaAddBtn} onPress={handleOpenFactureModal} activeOpacity={0.8}>
+                    <Plus color={C.gray900} size={14} />
+                    <Text style={s.agendaAddBtnText}>Créer la première facture</Text>
+                  </TouchableOpacity>
                 </View>
-              </TouchableOpacity>
+              ) : (
+                <View style={{ gap: 10, marginTop: 10 }}>
+                  {factures.map((f) => {
+                    const statusColor = f.statut === 'payee' ? C.green600 : f.statut === 'en_retard' ? C.red600 : f.statut === 'partielle' ? C.amber600 : C.gray600;
+                    const statusBg = f.statut === 'payee' ? C.green50 : f.statut === 'en_retard' ? C.red50 : f.statut === 'partielle' ? C.amber50 : C.gray100;
+                    return (
+                      <View key={String(f.id)} style={[s.timeSlotCard, { backgroundColor: C.white, borderLeftColor: statusColor, borderLeftWidth: 4 }]}>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <Text style={s.timeSlotTitle}>{f.numeroFacture}</Text>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                            <View style={{ backgroundColor: statusBg, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 }}>
+                              <Text style={{ fontSize: 10, fontWeight: '700', color: statusColor }}>{f.statut.toUpperCase()}</Text>
+                            </View>
+                            <TouchableOpacity style={{ padding: 4 }} onPress={() => handleDeleteFacture(f)} activeOpacity={0.8}>
+                              <Trash2 color={C.red600} size={15} />
+                            </TouchableOpacity>
+                          </View>
+                        </View>
+                        {f.description ? <Text style={{ fontSize: 12, color: C.gray600, marginTop: 2 }}>{f.description}</Text> : null}
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 8, paddingTop: 6, borderTopWidth: 1, borderTopColor: C.gray100 }}>
+                          <Text style={{ fontSize: 12, color: C.gray500 }}>Montant TTC: <Text style={{ fontWeight: '700', color: C.gray900 }}>{new Intl.NumberFormat('fr-FR').format(Math.round(Number(f.montantTtc)))} FCFA</Text></Text>
+                          <Text style={{ fontSize: 12, fontWeight: '700', color: statusColor }}>Solde: {new Intl.NumberFormat('fr-FR').format(Math.round(getSoldeRestant(f)))} FCFA</Text>
+                        </View>
+                      </View>
+                    );
+                  })}
+                </View>
+              )}
             </View>
           )}
 
         </ScrollView>
       </SafeAreaView>
+
+      {/* ── MODAL POP-UP DES NOTIFICATIONS (Relié à l'icône cloche 🔔) ── */}
+      <Modal visible={showNotifPopUp} transparent animationType="slide" onRequestClose={() => setShowNotifPopUp(false)}>
+        <TouchableOpacity style={s.overlay} activeOpacity={1} onPress={() => setShowNotifPopUp(false)}>
+          <TouchableOpacity style={s.sheetNotif} activeOpacity={1} onPress={() => {}}>
+            <View style={s.handle} />
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Bell color={C.amber600} size={20} />
+                <Text style={s.sheetNotifTitle}>Notifications</Text>
+                {nonLues > 0 && (
+                  <View style={s.notifBadgePop}>
+                    <Text style={s.notifBadgePopText}>{nonLues} non lue(s)</Text>
+                  </View>
+                )}
+              </View>
+              <TouchableOpacity style={s.closeBtn} onPress={() => setShowNotifPopUp(false)}>
+                <X color={C.gray600} size={18} />
+              </TouchableOpacity>
+            </View>
+
+            {nonLues > 0 && (
+              <TouchableOpacity style={s.markAllPopBtn} onPress={handleMarkAllRead} activeOpacity={0.8}>
+                <CheckCheck color={C.amber900} size={14} />
+                <Text style={s.markAllPopText}>Tout marquer comme lu</Text>
+              </TouchableOpacity>
+            )}
+
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 10, paddingTop: 10 }}>
+              {loadingNotifs ? (
+                <ActivityIndicator color={C.amber500} style={{ paddingVertical: 20 }} />
+              ) : notifs.length === 0 ? (
+                <View style={s.emptyNotifBox}>
+                  <Bell color={C.gray400} size={36} />
+                  <Text style={s.emptyNotifTitle}>Aucune notification</Text>
+                  <Text style={s.emptyNotifSub}>Vous êtes parfaitement à jour !</Text>
+                </View>
+              ) : (
+                notifs.map(n => (
+                  <TouchableOpacity
+                    key={String(n.id)}
+                    style={[s.notifCardItem, !n.lu && s.notifCardItemUnread]}
+                    onPress={() => handleMarkRead(n.id)}
+                    activeOpacity={0.85}
+                  >
+                    <View style={{ flexDirection: 'row', gap: 10, alignItems: 'flex-start' }}>
+                      <View style={[s.notifIconWrap, n.type === 'facture_retard' ? { backgroundColor: C.red100 } : { backgroundColor: C.blue100 }]}>
+                        {n.type === 'facture_retard' ? <AlertTriangle color={C.red600} size={16} /> : <Bell color={C.blue600} size={16} />}
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={[s.notifItemTitle, !n.lu && { color: C.gray900 }]} numberOfLines={1}>{n.titre}</Text>
+                        <Text style={s.notifItemMsg} numberOfLines={2}>{n.message}</Text>
+                        <Text style={s.notifItemDate}>{new Date(n.createdAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</Text>
+                      </View>
+                      {!n.lu && <View style={s.unreadDotPop} />}
+                    </View>
+                  </TouchableOpacity>
+                ))
+              )}
+            </ScrollView>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
+      {/* ── MODAL NOUVELLE FACTURE (PAGE D'ACCUEIL) ── */}
+      <Modal visible={showFactureModal} transparent animationType="slide" onRequestClose={() => setShowFactureModal(false)}>
+        <TouchableOpacity style={s.overlay} activeOpacity={1} onPress={() => setShowFactureModal(false)}>
+          <TouchableOpacity style={s.sheetNotif} activeOpacity={1} onPress={() => {}}>
+            <View style={s.handle} />
+            <Text style={{ fontSize: 17, fontWeight: '700', color: C.gray900, marginBottom: 14 }}>Nouvelle Facture d'Honoraires</Text>
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+
+              {/* Dossier */}
+              <View style={{ marginBottom: 12 }}>
+                <Text style={{ fontSize: 13, fontWeight: '600', color: C.gray900, marginBottom: 6 }}>Dossier / Affaire concernée *</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+                  {dossiers.map(d => (
+                    <TouchableOpacity
+                      key={d.id}
+                      onPress={() => setFactDossierId(Number(d.id))}
+                      style={[{ paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, backgroundColor: C.gray100, borderWidth: 1, borderColor: C.gray200 }, Number(factDossierId) === Number(d.id) && { backgroundColor: C.amber100, borderColor: C.amber400 }]}
+                    >
+                      <Text style={[{ fontSize: 12, color: C.gray700 }, Number(factDossierId) === Number(d.id) && { color: C.amber900, fontWeight: '700' }]}>
+                        {d.numeroAffaire} — {d.titre}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+
+              {/* Montant HT & TVA */}
+              <View style={{ flexDirection: 'row', gap: 10, marginBottom: 12 }}>
+                <View style={{ flex: 2 }}>
+                  <Text style={{ fontSize: 13, fontWeight: '600', color: C.gray900, marginBottom: 6 }}>Montant HT (FCFA) *</Text>
+                  <TextInput
+                    style={{ borderWidth: 1, borderColor: C.gray200, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 11, fontSize: 14, color: C.gray900 }}
+                    value={factMontantHt}
+                    onChangeText={setFactMontantHt}
+                    keyboardType="numeric"
+                    placeholder="ex: 500000"
+                    placeholderTextColor={C.gray400}
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 13, fontWeight: '600', color: C.gray900, marginBottom: 6 }}>TVA (%)</Text>
+                  <TextInput
+                    style={{ borderWidth: 1, borderColor: C.gray200, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 11, fontSize: 14, color: C.gray900 }}
+                    value={factTva}
+                    onChangeText={setFactTva}
+                    keyboardType="numeric"
+                    placeholder="19.25"
+                    placeholderTextColor={C.gray400}
+                  />
+                </View>
+              </View>
+
+              {/* Estimation TTC */}
+              {factMontantHt && !isNaN(Number(factMontantHt)) ? (
+                <View style={{ backgroundColor: C.amber50, borderWidth: 1, borderColor: C.amber200, borderRadius: 10, padding: 10, marginBottom: 12 }}>
+                  <Text style={{ fontSize: 13, color: C.amber900 }}>
+                    Montant TTC estimé : <Text style={{ fontWeight: '800', color: C.amber900 }}>{new Intl.NumberFormat('fr-FR').format(Math.round(Number(factMontantHt) * (1 + (Number(factTva) || 19.25) / 100)))} FCFA</Text>
+                  </Text>
+                </View>
+              ) : null}
+
+              {/* Échéance */}
+              <View style={{ marginBottom: 12 }}>
+                <Text style={{ fontSize: 13, fontWeight: '600', color: C.gray900, marginBottom: 6 }}>Date d'échéance (YYYY-MM-DD)</Text>
+                <TextInput
+                  style={{ borderWidth: 1, borderColor: C.gray200, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 11, fontSize: 14, color: C.gray900 }}
+                  value={factEcheance}
+                  onChangeText={setFactEcheance}
+                  placeholder="2026-10-15"
+                  placeholderTextColor={C.gray400}
+                />
+              </View>
+
+              {/* Description */}
+              <View style={{ marginBottom: 14 }}>
+                <Text style={{ fontSize: 13, fontWeight: '600', color: C.gray900, marginBottom: 6 }}>Description / Libellé des prestations</Text>
+                <TextInput
+                  style={{ borderWidth: 1, borderColor: C.gray200, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 11, fontSize: 14, color: C.gray900, height: 75, textAlignVertical: 'top' }}
+                  value={factDesc}
+                  onChangeText={setFactDesc}
+                  multiline
+                  numberOfLines={3}
+                  placeholder="ex: Honoraires de diligence, plaidoirie, rédaction d'actes..."
+                  placeholderTextColor={C.gray400}
+                />
+              </View>
+
+              <TouchableOpacity
+                style={[{ backgroundColor: C.amber500, borderRadius: 12, paddingVertical: 14, alignItems: 'center', marginTop: 6 }, creatingFact && { opacity: 0.6 }]}
+                onPress={handleCreateFacture}
+                disabled={creatingFact}
+                activeOpacity={0.85}
+              >
+                {creatingFact ? <ActivityIndicator color={C.gray900} /> : <Text style={{ fontSize: 14, fontWeight: '700', color: C.gray900 }}>Enregistrer la facture</Text>}
+              </TouchableOpacity>
+
+              <TouchableOpacity style={{ borderWidth: 1, borderColor: C.gray200, borderRadius: 12, paddingVertical: 14, alignItems: 'center', marginTop: 8 }} onPress={() => setShowFactureModal(false)} activeOpacity={0.8}>
+                <Text style={{ fontSize: 14, fontWeight: '500', color: C.gray500 }}>Annuler</Text>
+              </TouchableOpacity>
+            </ScrollView>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
     </View>
   );
 }
@@ -333,7 +727,13 @@ const s = StyleSheet.create({
   roleBadgeText: { fontSize: 11, fontWeight: '600', color: C.amber400 },
   headerRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   iconBtn: { padding: 8, backgroundColor: C.navy800, borderRadius: 10 },
+  bellBtn: { padding: 8, backgroundColor: C.navy800, borderRadius: 10, position: 'relative' },
   logoutBtn: { padding: 8, backgroundColor: C.navy800, borderRadius: 10 },
+  badge: {
+    position: 'absolute', top: -2, right: -2, backgroundColor: C.red500,
+    borderRadius: 9, minWidth: 18, height: 18, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4,
+  },
+  badgeText: { color: C.white, fontSize: 10, fontWeight: '700' },
   dashTabsRow: { paddingHorizontal: 14, paddingVertical: 10, gap: 8, backgroundColor: C.navy900 },
   dashTabBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
@@ -412,4 +812,23 @@ const s = StyleSheet.create({
   },
   aiTitle: { fontSize: 15, fontWeight: '700', color: C.white },
   aiSub: { fontSize: 12, color: C.gray400, marginTop: 2 },
+  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  sheetNotif: { backgroundColor: C.white, borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: '80%', padding: 20 },
+  handle: { width: 40, height: 4, backgroundColor: C.gray200, borderRadius: 2, alignSelf: 'center', marginBottom: 14 },
+  sheetNotifTitle: { fontSize: 17, fontWeight: '700', color: C.gray900 },
+  notifBadgePop: { backgroundColor: C.red100, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10 },
+  notifBadgePopText: { fontSize: 10, fontWeight: '700', color: C.red700 },
+  closeBtn: { padding: 6, backgroundColor: C.gray100, borderRadius: 12 },
+  markAllPopBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: C.amber50, borderWidth: 1, borderColor: C.amber200, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, marginBottom: 6 },
+  markAllPopText: { fontSize: 12, fontWeight: '600', color: C.amber900 },
+  emptyNotifBox: { alignItems: 'center', paddingVertical: 30, gap: 6 },
+  emptyNotifTitle: { fontSize: 14, fontWeight: '700', color: C.gray900 },
+  emptyNotifSub: { fontSize: 12, color: C.gray500 },
+  notifCardItem: { backgroundColor: C.gray50, borderWidth: 1, borderColor: C.gray200, borderRadius: 12, padding: 12, position: 'relative' },
+  notifCardItemUnread: { backgroundColor: C.white, borderColor: C.amber300, borderLeftWidth: 4, borderLeftColor: C.amber500 },
+  notifIconWrap: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+  notifItemTitle: { fontSize: 13, fontWeight: '600', color: C.gray800 },
+  notifItemMsg: { fontSize: 12, color: C.gray600, marginTop: 2 },
+  notifItemDate: { fontSize: 10, color: C.gray400, marginTop: 4 },
+  unreadDotPop: { width: 8, height: 8, borderRadius: 4, backgroundColor: C.amber500 },
 });

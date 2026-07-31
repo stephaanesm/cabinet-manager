@@ -320,10 +320,25 @@ export default function FacturationScreen() {
             <View style={s.center}>
               <DollarSign color={C.gray400} size={44} />
               <Text style={s.emptyText}>Aucune facture trouvée</Text>
+              {!search && (
+                <TouchableOpacity
+                  style={s.emptyAddBtn}
+                  onPress={handleOpenCreateModal}
+                  activeOpacity={0.8}
+                >
+                  <Plus color={C.gray900} size={16} />
+                  <Text style={s.emptyAddBtnText}>Créer une facture</Text>
+                </TouchableOpacity>
+              )}
             </View>
           )
         }
       />
+
+      {/* Floating Action Button (FAB) pour la création rapide de facture */}
+      <TouchableOpacity style={s.fab} onPress={handleOpenCreateModal} activeOpacity={0.85}>
+        <Plus color={C.gray900} size={28} />
+      </TouchableOpacity>
 
       {/* ── MODAL NOUVELLE FACTURE ── */}
       <Modal visible={showCreateModal} transparent animationType="slide" onRequestClose={() => setShowCreateModal(false)}>
@@ -331,7 +346,7 @@ export default function FacturationScreen() {
           <TouchableOpacity style={s.sheet} activeOpacity={1} onPress={() => {}}>
             <View style={s.handle} />
             <Text style={s.sheetTitle}>Nouvelle Facture d'Honoraires</Text>
-            <ScrollView showsVerticalScrollIndicator={false}>
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
 
               {/* Dossier */}
               <View style={{ marginBottom: 12 }}>
@@ -619,4 +634,19 @@ const s = StyleSheet.create({
   saveBtnText: { fontSize: 14, fontWeight: '600', color: C.gray900 },
   cancelBtn: { borderWidth: 1, borderColor: C.gray200, borderRadius: 12, paddingVertical: 14, alignItems: 'center', marginTop: 8 },
   cancelBtnText: { fontSize: 14, fontWeight: '500', color: C.gray500 },
+  fab: {
+    position: 'absolute', bottom: 20, right: 20,
+    width: 56, height: 56, borderRadius: 28,
+    backgroundColor: C.amber500,
+    alignItems: 'center', justifyContent: 'center',
+    shadowColor: C.black, shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3, shadowRadius: 6, elevation: 6,
+    zIndex: 100,
+  },
+  emptyAddBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: C.amber500, borderRadius: 12,
+    paddingHorizontal: 18, paddingVertical: 10, marginTop: 12,
+  },
+  emptyAddBtnText: { fontSize: 14, fontWeight: '700', color: C.gray900 },
 });

@@ -177,6 +177,73 @@ export class FacturationService {
     });
   }
 
+  async genererPdfFacture(id: number, user: AuthenticatedUser): Promise<Buffer> {
+    const f = await this.findOneFacture(id, user);
+    const encaissements = await this.getEncaissements(id, user);
+
+    const ht = Number(f.montantHt);
+    const tva = Number(f.montantHt * (f.tauxTva / 100));
+    const ttc = Number(f.montantTtc);
+    const encaisse = Number(f.montantEncaisse);
+    const reste = Math.max(0, ttc - encaisse);
+
+    const pdfContent = `%PDF-1.4
+1 0 obj <</Type /Catalog /Pages 2 0 R>> endobj
+2 0 obj <</Type /Pages /Kinds [3 0 R] /Count 1>> endobj
+3 0 obj <</Type /Page /Parent 2 0 R /Resources <</Font <</F1 4 0 R>>>> /Contents 5 0 R>> endobj
+4 0 obj <</Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold>> endobj
+5 0 obj <</Length 600>> stream
+BT
+/F1 16 Tf
+50 750 TD
+(FACTURE D'HONORAIRES DE CABINET D'AVOCATS) Tj
+/F1 11 Tf
+0 -30 TD
+(Numero de Facture : ${f.numeroFacture}) Tj
+0 -18 TD
+(Date d'Emission  : ${new Date(f.dateEmission).toLocaleDateString('fr-FR')}) Tj
+0 -18 TD
+(Statut          : ${f.statut.toUpperCase()}) Tj
+0 -30 TD
+(----------------------------------------------------------------------) Tj
+0 -20 TD
+(Description : ${f.description || 'Prestations juridiques et honoraires d\'avocat'}) Tj
+0 -30 TD
+(Montant HT        : ${ht.toLocaleString('fr-FR')} FCFA) Tj
+0 -18 TD
+(TVA (${f.tauxTva}%)      : ${tva.toLocaleString('fr-FR')} FCFA) Tj
+0 -18 TD
+(TOTAL TTC         : ${ttc.toLocaleString('fr-FR')} FCFA) Tj
+0 -18 TD
+(Montant Encaissé  : ${encaisse.toLocaleString('fr-FR')} FCFA) Tj
+0 -22 TD
+(SOLDE RESTANT DÙ  : ${reste.toLocaleString('fr-FR')} FCFA) Tj
+0 -40 TD
+(Mentions Legales : Facture payable sous 30 jours. Merci de votre confiance.) Tj
+ET
+endstream endobj
+xref
+0 6
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000216 00000 n 
+0000000295 00000 n 
+trailer <</Size 6 /Root 1 0 R>>
+startxref
+940
+%%EOF`;
+
+    return Buffer.from(pdfContent, 'utf-8');
+  }
+
+  async deleteFacture(id: number, user: AuthenticatedUser): Promise<void> {
+    const f = await this.findOneFacture(id, user);
+    f.deletedAt = new Date();
+    await this.factureRepo.save(f);
+  }
+
   // ── Helpers ──────────────────────────────────────────────────────────────
 
   private calculerStatut(f: Facture): FactureStatut {

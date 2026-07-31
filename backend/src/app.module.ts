@@ -31,6 +31,9 @@ import { Utilisateur } from './modules/users/entities/utilisateur.entity';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { Notification } from './modules/notifications/entities/notification.entity';
 
+import { SyncModule } from './modules/sync/sync.module';
+import { AssistantIaModule } from './modules/assistant-ia/assistant-ia.module';
+
 @Module({
   imports: [
     TypeOrmModule.forRoot({
@@ -67,6 +70,8 @@ import { Notification } from './modules/notifications/entities/notification.enti
     DocumentsModule,
     FacturationModule,
     NotificationsModule,
+    SyncModule,
+    AssistantIaModule,
   ],
   controllers: [HealthController],
 })

@@ -12,6 +12,22 @@ import { extractErrorMessage } from '@/lib/api';
 
 type ClientType = 'personne_physique' | 'personne_morale';
 
+function Field({ label, value, onChangeText, placeholder, keyboardType = 'default', required = false }: any) {
+  return (
+    <View style={sf.field}>
+      <Text style={sf.label}>{label}{required && <Text style={{ color: C.red500 }}> *</Text>}</Text>
+      <TextInput
+        style={[sf.input, { borderColor: C.gray200 }]}
+        value={value}
+        onChangeText={onChangeText}
+        placeholder={placeholder}
+        placeholderTextColor={C.gray400}
+        keyboardType={keyboardType}
+      />
+    </View>
+  );
+}
+
 export default function NouveauClientScreen() {
   const router = useRouter();
   const [type, setType] = useState<ClientType>('personne_physique');
@@ -60,20 +76,6 @@ export default function NouveauClientScreen() {
       setIsLoading(false);
     }
   };
-
-  const Field = ({ label, value, onChangeText, placeholder, keyboardType = 'default', required = false }: any) => (
-    <View style={sf.field}>
-      <Text style={sf.label}>{label}{required && <Text style={{ color: C.red500 }}> *</Text>}</Text>
-      <TextInput
-        style={[sf.input, { borderColor: C.gray200 }]}
-        value={value}
-        onChangeText={onChangeText}
-        placeholder={placeholder}
-        placeholderTextColor={C.gray400}
-        keyboardType={keyboardType}
-      />
-    </View>
-  );
 
   return (
     <View style={sf.root}>

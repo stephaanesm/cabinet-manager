@@ -12,7 +12,10 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
+  HttpCode,
+  HttpStatus,
   Param,
   ParseIntPipe,
   Patch,
@@ -100,5 +103,16 @@ export class DossiersController {
     @Scope() scope: PermissionScope,
   ) {
     return this.dossiersService.calculerRentabilite(id, user, scope);
+  }
+
+  @RequirePermission('dossiers', 'update')
+  @Delete(':id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async delete(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: AuthenticatedUser,
+    @Scope() scope: PermissionScope,
+  ) {
+    await this.dossiersService.delete(id, user, scope);
   }
 }

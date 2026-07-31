@@ -62,6 +62,7 @@ export interface UpdateDossierDto {
   titre?: string;
   juridiction?: string;
   notes?: string;
+  statut?: DossierStatut;
   avocatResponsableId?: number;
   versionConnue?: number;
 }
@@ -109,4 +110,8 @@ export async function cloturerDossier(id: number): Promise<Dossier> {
 export async function getRentabiliteDossier(id: number): Promise<Rentabilite> {
   const { data } = await api.get<Rentabilite>(`/dossiers/${id}/rentabilite`);
   return data;
+}
+
+export async function deleteDossier(id: number): Promise<void> {
+  await api.delete(`/dossiers/${id}`);
 }

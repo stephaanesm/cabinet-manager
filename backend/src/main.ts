@@ -12,6 +12,7 @@
  *  6. Écoute sur le port configuré (défaut : 8080)
  * ---------------------------------------------------------------------------
  */
+import 'dotenv/config';
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { AppModule } from './app.module';
