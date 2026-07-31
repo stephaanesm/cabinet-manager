@@ -1,4 +1,4 @@
-import { AuthProvider } from '@/hooks/useAuth';
+import { AuthProvider, useAuth } from '@/hooks/useAuth';
 import { useNetworkSync } from '@/hooks/useNetworkSync';
 import { AppColors as C } from '@/constants/theme';
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
@@ -12,7 +12,8 @@ SplashScreen.preventAutoHideAsync();
 
 /** Bandeau Hors-ligne — affiché globalement quand le réseau est absent */
 function OfflineBanner() {
-  const { isOnline, queueCount, isSyncing, syncNow } = useNetworkSync();
+  const { user } = useAuth();
+  const { isOnline, queueCount, isSyncing, syncNow } = useNetworkSync(user?.cabinetId ?? 0);
 
   if (isOnline && queueCount === 0) return null;
 

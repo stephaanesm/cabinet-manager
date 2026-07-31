@@ -25,6 +25,7 @@ import {
     saveTokens,
     saveUser
 } from '@/lib/secureStorage';
+import { clearSessionData } from '@/lib/offlineQueue';
 import { useRouter, useSegments } from 'expo-router';
 import React, {
     createContext,
@@ -205,12 +206,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         });
       }
     } finally {
+      // Effacer les données offline de la session courante avant de nettoyer les tokens
+      if (user?.cabinetId) {
+        await clearSessionData(user.cabinetId).catch(() => {});
+      }
       await clearAll();
       setUser(null);
       hasNavigated.current = true;
       router.replace('/login');
     }
-  }, [router]);
+  }, [router, user]);
 
   // ── refreshUser ───────────────────────────────────────────────────────────
 

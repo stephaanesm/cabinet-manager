@@ -10,8 +10,12 @@
  *  - Expose l'état réseau courant et les statistiques de la queue offline
  *    pour l'affichage dans l'UI (ex. bandeau "Hors-ligne — X mutations en attente").
  *
+ * Isolation multi-tenant :
+ *  - Toutes les opérations de queue/sync sont namespaced par cabinetId.
+ *  - Si cabinetId est 0 (non connecté), le hook est inactif.
+ *
  * Utilisation :
- *   const { isOnline, queueCount, isSyncing, lastSyncAt, syncNow } = useNetworkSync();
+ *   const { isOnline, queueCount, isSyncing, lastSyncAt, syncNow } = useNetworkSync(cabinetId);
  * ─────────────────────────────────────────────────────────────────
  */
 
@@ -21,10 +25,6 @@ import {
   flush, getLastSyncAt, getQueueStats, pullDeltas,
   SyncBatchResponse, DeltaResponse,
 } from '@/lib/offlineQueue';
-
-// React Native expose NetInfo directement dans le module react-native
-// pour les versions sans @react-native-community/netinfo. On utilise
-// l'API native via l'event listener fourni par React Native.
 
 export interface NetworkSyncState {
   /** true si le réseau est disponible */
@@ -39,7 +39,7 @@ export interface NetworkSyncState {
   syncNow: () => Promise<{ batch: SyncBatchResponse | null; deltas: DeltaResponse | null }>;
 }
 
-export function useNetworkSync(): NetworkSyncState {
+export function useNetworkSync(cabinetId: number = 0): NetworkSyncState {
   const [isOnline,    setIsOnline]    = useState(true);
   const [queueCount,  setQueueCount]  = useState(0);
   const [isSyncing,   setIsSyncing]   = useState(false);
@@ -50,31 +50,34 @@ export function useNetworkSync(): NetworkSyncState {
 
   // ── Rafraîchit les stats de la queue ────────────────────────────────────
   const refreshStats = useCallback(async () => {
-    const stats = await getQueueStats();
+    if (!cabinetId) return;
+    const stats = await getQueueStats(cabinetId);
     setQueueCount(stats.count);
-    const last = await getLastSyncAt();
+    const last = await getLastSyncAt(cabinetId);
     setLastSyncAt(last);
-  }, []);
+  }, [cabinetId]);
 
   // ── Synchronisation complète (flush + pull deltas) ───────────────────────
   const syncNow = useCallback(async () => {
-    if (syncingRef.current) return { batch: null, deltas: null };
+    if (syncingRef.current || !cabinetId) return { batch: null, deltas: null };
     syncingRef.current = true;
     setIsSyncing(true);
 
     try {
-      const batch  = await flush();
-      const deltas = await pullDeltas();
+      const batch  = await flush(cabinetId);
+      const deltas = await pullDeltas(cabinetId);
       await refreshStats();
       return { batch, deltas };
     } finally {
       syncingRef.current = false;
       setIsSyncing(false);
     }
-  }, [refreshStats]);
+  }, [cabinetId, refreshStats]);
 
   // ── Surveillance de la connexion réseau ──────────────────────────────────
   useEffect(() => {
+    if (!cabinetId) return;
+
     // Initialisation : lire l'état réseau courant via fetch (test léger)
     const checkConnectivity = async () => {
       try {
@@ -100,7 +103,7 @@ export function useNetworkSync(): NetworkSyncState {
     const handleAppStateChange = async (nextState: AppStateStatus) => {
       if (nextState === 'active') {
         await checkConnectivity();
-        const stats = await getQueueStats();
+        const stats = await getQueueStats(cabinetId);
         if (stats.count > 0) {
           // Il y a des mutations en attente → tenter une sync
           await syncNow();
@@ -113,7 +116,7 @@ export function useNetworkSync(): NetworkSyncState {
     return () => {
       subscription.remove();
     };
-  }, [syncNow, refreshStats]);
+  }, [cabinetId, syncNow, refreshStats]);
 
   // ── Sync automatique quand le réseau revient ─────────────────────────────
   const prevOnlineRef = useRef(isOnline);
@@ -121,11 +124,11 @@ export function useNetworkSync(): NetworkSyncState {
     const wasOffline = !prevOnlineRef.current;
     prevOnlineRef.current = isOnline;
 
-    if (isOnline && wasOffline) {
+    if (isOnline && wasOffline && cabinetId) {
       // Réseau vient de revenir → déclencher sync
       syncNow();
     }
-  }, [isOnline, syncNow]);
+  }, [isOnline, cabinetId, syncNow]);
 
   return { isOnline, queueCount, isSyncing, lastSyncAt, syncNow };
 }

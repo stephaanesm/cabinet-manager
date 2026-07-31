@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, UnauthorizedException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Document } from './entities/document.entity';
@@ -60,23 +60,26 @@ export class DocumentsService {
     if (!file || !file.buffer) {
       throw new BadRequestException('Aucun fichier binaire valide reçu pour l\'upload.');
     }
+    if (!user?.cabinetId) {
+      throw new UnauthorizedException('Utilisateur non authentifié ou cabinet introuvable.');
+    }
 
     const meta = await this.storageService.stockerFichier(
       file.buffer,
       file.originalname,
       file.mimetype,
-      user?.cabinetId ?? 1,
+      user.cabinetId,
     );
 
     const doc = this.repo.create({
-      cabinetId: user?.cabinetId ?? 1,
+      cabinetId: user.cabinetId,
       dossierId: dossierId ?? null,
       nom: file.originalname,
       typeDocument: typeDocument ?? 'acte',
       cheminFichier: meta.cheminRelatif,
       tailleKo: meta.tailleKo,
       description: description ?? null,
-      creePar: user?.id ?? 1,
+      creePar: user.id,
       version: 1,
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -85,7 +88,7 @@ export class DocumentsService {
     const saved = await this.repo.save(doc);
 
     await this.journalService.enregistrer({
-      cabinetId: user?.cabinetId ?? 1, utilisateurId: user?.id ?? 1,
+      cabinetId: user.cabinetId, utilisateurId: user.id,
       action: 'document.upload', entiteType: 'document',
       entiteId: saved.id, donneesApres: { ...saved },
     });

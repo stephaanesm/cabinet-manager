@@ -10,17 +10,20 @@
  *   3. idMapping: les UUIDs temporaires (créations offline) sont remplacés
  *      par les IDs serveur définitifs dans les résultats.
  *
- * Clés AsyncStorage utilisées :
- *   - OFFLINE_QUEUE_KEY  : tableau de BatchSyncItem[]
- *   - LAST_SYNC_KEY      : ISO date de la dernière synchronisation réussie
+ * Isolation multi-tenant :
+ *   Les clés AsyncStorage sont préfixées par cabinetId pour éviter tout
+ *   mélange de données entre comptes sur le même appareil.
+ *   clearSessionData() doit être appelé au logout pour nettoyer toutes
+ *   les données de session de l'utilisateur courant.
+ *
+ * Clés AsyncStorage utilisées (préfixées par cabinet_{id}:) :
+ *   - offline_queue  : tableau de BatchSyncItem[]
+ *   - last_sync_at   : ISO date de la dernière synchronisation réussie
  * ─────────────────────────────────────────────────────────────────
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import api from './api';
-
-const OFFLINE_QUEUE_KEY = 'cabinet_manager:offline_queue';
-const LAST_SYNC_KEY     = 'cabinet_manager:last_sync_at';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -62,39 +65,71 @@ export interface DeltaResponse {
   documents:  unknown[];
 }
 
+// ── Clés namespaced par cabinetId ─────────────────────────────────────────────
+
+function queueKey(cabinetId: number): string {
+  return `cabinet_${cabinetId}:offline_queue`;
+}
+
+function syncKey(cabinetId: number): string {
+  return `cabinet_${cabinetId}:last_sync_at`;
+}
+
+// Clé legacy (sans cabinetId) — pour migration
+const LEGACY_QUEUE_KEY   = 'cabinet_manager:offline_queue';
+const LEGACY_SYNC_KEY    = 'cabinet_manager:last_sync_at';
+
 // ── Lecture / écriture de la queue ────────────────────────────────────────────
 
-export async function getQueue(): Promise<QueueItem[]> {
+export async function getQueue(cabinetId: number): Promise<QueueItem[]> {
   try {
-    const raw = await AsyncStorage.getItem(OFFLINE_QUEUE_KEY);
+    const raw = await AsyncStorage.getItem(queueKey(cabinetId));
     return raw ? (JSON.parse(raw) as QueueItem[]) : [];
   } catch {
     return [];
   }
 }
 
-export async function enqueue(item: Omit<QueueItem, 'horodatageClient'>): Promise<void> {
-  const queue = await getQueue();
+export async function enqueue(item: Omit<QueueItem, 'horodatageClient'>, cabinetId: number): Promise<void> {
+  const queue = await getQueue(cabinetId);
   queue.push({ ...item, horodatageClient: new Date().toISOString() });
-  await AsyncStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(queue));
+  await AsyncStorage.setItem(queueKey(cabinetId), JSON.stringify(queue));
 }
 
-async function clearQueue(): Promise<void> {
-  await AsyncStorage.removeItem(OFFLINE_QUEUE_KEY);
+export async function clearQueue(cabinetId: number): Promise<void> {
+  await AsyncStorage.removeItem(queueKey(cabinetId));
 }
 
 // ── Timestamp de dernière sync ────────────────────────────────────────────────
 
-export async function getLastSyncAt(): Promise<string | null> {
+export async function getLastSyncAt(cabinetId: number): Promise<string | null> {
   try {
-    return await AsyncStorage.getItem(LAST_SYNC_KEY);
+    return await AsyncStorage.getItem(syncKey(cabinetId));
   } catch {
     return null;
   }
 }
 
-async function saveLastSyncAt(iso: string): Promise<void> {
-  await AsyncStorage.setItem(LAST_SYNC_KEY, iso);
+export async function saveLastSyncAt(cabinetId: number, iso: string): Promise<void> {
+  await AsyncStorage.setItem(syncKey(cabinetId), iso);
+}
+
+export async function clearLastSyncAt(cabinetId: number): Promise<void> {
+  await AsyncStorage.removeItem(syncKey(cabinetId));
+}
+
+/**
+ * Efface toutes les données de session offline pour un cabinet donné.
+ * À appeler au logout pour garantir l'isolation entre comptes.
+ */
+export async function clearSessionData(cabinetId: number): Promise<void> {
+  await Promise.all([
+    clearQueue(cabinetId),
+    clearLastSyncAt(cabinetId),
+    // Nettoyage des clés legacy si présentes (migration one-time)
+    AsyncStorage.removeItem(LEGACY_QUEUE_KEY),
+    AsyncStorage.removeItem(LEGACY_SYNC_KEY),
+  ]);
 }
 
 // ── Flush — envoie la queue au serveur ───────────────────────────────────────
@@ -103,8 +138,8 @@ async function saveLastSyncAt(iso: string): Promise<void> {
  * Envoie toutes les mutations en attente au backend (POST /sync/batch).
  * Retourne le résultat du batch ou null en cas d'erreur réseau.
  */
-export async function flush(): Promise<SyncBatchResponse | null> {
-  const queue = await getQueue();
+export async function flush(cabinetId: number): Promise<SyncBatchResponse | null> {
+  const queue = await getQueue(cabinetId);
   if (queue.length === 0) return null;
 
   try {
@@ -113,8 +148,8 @@ export async function flush(): Promise<SyncBatchResponse | null> {
     });
 
     // Vider la queue uniquement si le batch a réussi
-    await clearQueue();
-    await saveLastSyncAt(new Date().toISOString());
+    await clearQueue(cabinetId);
+    await saveLastSyncAt(cabinetId, new Date().toISOString());
 
     return data;
   } catch (err) {
@@ -130,13 +165,13 @@ export async function flush(): Promise<SyncBatchResponse | null> {
  * Récupère les modifications serveur survenues depuis la dernière sync.
  * Retourne null si la connexion est indisponible.
  */
-export async function pullDeltas(): Promise<DeltaResponse | null> {
-  const depuis = await getLastSyncAt();
+export async function pullDeltas(cabinetId: number): Promise<DeltaResponse | null> {
+  const depuis = await getLastSyncAt(cabinetId);
   const params = depuis ? { depuis } : {};
 
   try {
     const { data } = await api.get<DeltaResponse>('/sync/delta', { params });
-    await saveLastSyncAt(new Date().toISOString());
+    await saveLastSyncAt(cabinetId, new Date().toISOString());
     return data;
   } catch (err) {
     console.warn('[OfflineQueue] pullDeltas échoué:', err);
@@ -146,8 +181,8 @@ export async function pullDeltas(): Promise<DeltaResponse | null> {
 
 // ── Statistiques de la queue (pour l'UI) ─────────────────────────────────────
 
-export async function getQueueStats(): Promise<{ count: number; oldest: string | null }> {
-  const queue = await getQueue();
+export async function getQueueStats(cabinetId: number): Promise<{ count: number; oldest: string | null }> {
+  const queue = await getQueue(cabinetId);
   if (queue.length === 0) return { count: 0, oldest: null };
   return {
     count:  queue.length,
