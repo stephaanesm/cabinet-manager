@@ -123,4 +123,14 @@ export class AuthService {
   async getMe(utilisateurId: number) {
     return this.usersService.toSafeProfile(await this.usersService.findById(utilisateurId));
   }
+
+  // ── Token Expo Push ───────────────────────────────────────────────────────
+
+  /**
+   * Enregistre ou met à jour le token Expo Push de l'appareil de l'utilisateur.
+   * Appelé par POST /auth/push-token après la connexion réussie.
+   */
+  async enregistrerExpoPushToken(utilisateurId: number, expoPushToken: string): Promise<void> {
+    await this.usersService.sauvegarderExpoPushToken(utilisateurId, expoPushToken);
+  }
 }

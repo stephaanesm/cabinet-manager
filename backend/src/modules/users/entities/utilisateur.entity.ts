@@ -82,4 +82,12 @@ export class Utilisateur {
 
   @Column({ name: 'deleted_at', type: 'timestamptz', nullable: true })
   deletedAt: Date | null;
+
+  /**
+   * Token Expo Push (ExponentPushToken[xxxx]) enregistré par l'appareil mobile.
+   * Mis à jour automatiquement au login via POST /auth/push-token.
+   * Utilisé par MessagingService.envoyerPush() pour les notifications natives.
+   */
+  @Column({ name: 'expo_push_token', type: 'varchar', length: 200, nullable: true })
+  expoPushToken: string | null;
 }

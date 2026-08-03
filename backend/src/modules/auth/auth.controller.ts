@@ -77,4 +77,20 @@ export class AuthController {
   async me(@CurrentUser() user: AuthenticatedUser) {
     return this.authService.getMe(user.id);
   }
+
+  // ── Enregistrement du token Expo Push ───────────────────────────
+  /**
+   * POST /api/v1/auth/push-token
+   * L'app mobile l'appelle au démarrage avec l'Expo Push Token de l'appareil.
+   * Ce token est ensuite utilisé par MessagingService pour envoyer des
+   * notifications push natives (FCM sur Android, APNs sur iOS).
+   */
+  @Post('push-token')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async enregistrerPushToken(
+    @Body() body: { expoPushToken: string },
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    await this.authService.enregistrerExpoPushToken(user.id, body.expoPushToken);
+  }
 }

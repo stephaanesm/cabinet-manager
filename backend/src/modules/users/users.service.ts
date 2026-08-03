@@ -209,4 +209,15 @@ export class UsersService {
       actif: utilisateur.actif,
     };
   }
+
+  /**
+   * Enregistre ou met à jour le token Expo Push de l'appareil de l'utilisateur.
+   * Silencieux si l'utilisateur est introuvable (évite les erreurs au boot).
+   */
+  async sauvegarderExpoPushToken(utilisateurId: number, expoPushToken: string): Promise<void> {
+    await this.utilisateurRepository.update(
+      { id: utilisateurId },
+      { expoPushToken },
+    );
+  }
 }
