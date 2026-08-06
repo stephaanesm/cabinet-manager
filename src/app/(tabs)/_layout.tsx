@@ -2,20 +2,24 @@ import { Tabs } from 'expo-router';
 import { LayoutDashboard, Briefcase, Users, Calendar, Brain, Receipt, FolderOpen } from 'lucide-react-native';
 import { AppColors as C } from '@/constants/theme';
 
+import { usePreferences } from '@/context/PreferencesContext';
+
 export default function TabsLayout() {
+  const { isDark } = usePreferences();
+
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
         tabBarStyle: {
-          backgroundColor: C.gray900,
-          borderTopColor: C.gray800,
+          backgroundColor: isDark ? C.gray900 : C.white,
+          borderTopColor: isDark ? C.gray800 : C.gray200,
           borderTopWidth: 1,
           height: 60,
           paddingBottom: 6,
         },
         tabBarActiveTintColor: C.amber500,
-        tabBarInactiveTintColor: C.gray500,
+        tabBarInactiveTintColor: isDark ? C.gray500 : C.gray600,
         tabBarLabelStyle: { fontSize: 10, fontWeight: '500' },
       }}
     >

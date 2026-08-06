@@ -97,6 +97,7 @@ export class TokenService {
       role: utilisateur.role,
       permissions,
       twoFactorVerified: !utilisateur.authentif2faActif, // true si le 2FA n'est pas requis
+      email: utilisateur.email,
     };
 
     const accessToken = this.genererAccessToken(payload);

@@ -14,6 +14,7 @@ import { useDocuments } from '@/hooks/useDocuments';
 import { useDossiers } from '@/hooks/useDossiers';
 import { useAudiences } from '@/hooks/useAudiences';
 import { Document, getDocumentDownloadUrl } from '@/services/documents.service';
+import { hasDossierAccess } from '@/services/dossierInvitations.service';
 import { apercuAvecAppCompatible, telechargerDansTelephone } from '@/lib/fileViewerManager';
 import { getAccessToken } from '@/lib/secureStorage';
 import * as DocumentPicker from 'expo-document-picker';
@@ -425,7 +426,17 @@ export default function DocumentsScreen() {
 
           {/* Liste Documents */}
           <FlatList
-            data={documents}
+            data={documents.filter(doc => {
+              const isPublic = doc.confidentialite === 'public';
+              const hasAccess = !doc.dossierId || hasDossierAccess(doc.dossierId);
+              if (!isPublic && !hasAccess) return false;
+              if (searchQuery.trim()) {
+                const q = searchQuery.toLowerCase();
+                if (!doc.nom.toLowerCase().includes(q) && !(doc.description || '').toLowerCase().includes(q)) return false;
+              }
+              if (activeFilter !== 'all' && doc.confidentialite !== activeFilter) return false;
+              return true;
+            })}
             keyExtractor={item => String(item.id)}
             contentContainerStyle={s.listContent}
             refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={C.amber500} />}

@@ -74,20 +74,19 @@ export class DossiersService {
     user: AuthenticatedUser,
     scope: PermissionScope,
   ): SelectQueryBuilder<Dossier> {
-    qb.andWhere('dossier.cabinetId = :cabinetId', { cabinetId: user.cabinetId });
+    const userEmailClean = user.email ? user.email.trim().toLowerCase() : '';
+    qb.andWhere(
+      '(dossier.cabinetId = :cabinetId OR dossier.id IN (SELECT dossier_id FROM dossier_invitations WHERE LOWER(destinataire_email) = :userEmail AND statut = \'acceptee\'))',
+      { cabinetId: user.cabinetId, userEmail: userEmailClean },
+    );
     qb.andWhere('dossier.deletedAt IS NULL');
 
     if (scope === 'own' || scope === 'assigned') {
-      // NOTE : le modèle de données actuel n'a qu'un seul avocat responsable
-      // par dossier (pas de table d'assignation Assistant<->Dossier séparée).
-      // La portée "assigned" est donc traitée ici comme équivalente à "own"
-      // (filtrage sur avocat_responsable_id). Une future évolution pourra
-      // introduire une table dossier_assignations pour distinguer les deux
-      // finement si un cabinet a besoin d'assigner un dossier à un assistant
-      // sans en faire l'avocat responsable.
-      qb.andWhere('dossier.avocatResponsableId = :userId', { userId: user.id });
+      qb.andWhere(
+        '(dossier.avocatResponsableId = :userId OR dossier.id IN (SELECT dossier_id FROM dossier_invitations WHERE LOWER(destinataire_email) = :userEmail AND statut = \'acceptee\'))',
+        { userId: user.id, userEmail: userEmailClean },
+      );
     }
-    // scope === 'all' : aucun filtre supplémentaire (Associé/Administrateur)
 
     return qb;
   }
@@ -321,7 +320,15 @@ export class DossiersService {
       .andWhere('dossier.createdAt < :fin', { fin: finAnnee })
       .getCount();
 
-    const sequence = String(countAnnee + 1).padStart(4, '0');
-    return `AFF-${annee}-${sequence}`;
+    let seq = countAnnee + 1;
+    let numeroCandidate = `AFF-${annee}-${String(seq).padStart(4, '0')}`;
+
+    // Boucle de sécurité anti-collision
+    while (await this.dossierRepository.findOne({ where: { cabinetId, numeroAffaire: numeroCandidate } })) {
+      seq++;
+      numeroCandidate = `AFF-${annee}-${String(seq).padStart(4, '0')}`;
+    }
+
+    return numeroCandidate;
   }
 }

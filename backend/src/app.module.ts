@@ -30,9 +30,12 @@ import { RoleAcces } from './modules/users/entities/role-acces.entity';
 import { Utilisateur } from './modules/users/entities/utilisateur.entity';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { Notification } from './modules/notifications/entities/notification.entity';
+import { TexteLoi } from './modules/assistant-ia/entities/texte-loi.entity';
 
 import { SyncModule } from './modules/sync/sync.module';
 import { AssistantIaModule } from './modules/assistant-ia/assistant-ia.module';
+import { InvitationsModule } from './modules/invitations/invitations.module';
+import { DossierInvitationEntity } from './modules/invitations/entities/dossier-invitation.entity';
 
 @Module({
   imports: [
@@ -56,6 +59,8 @@ import { AssistantIaModule } from './modules/assistant-ia/assistant-ia.module';
         Facture,
         Encaissement,
         Notification,
+        TexteLoi,
+        DossierInvitationEntity,
       ],
       synchronize: false,
       logging: process.env.NODE_ENV === 'development' ? ['query', 'error'] : ['error'],
@@ -70,6 +75,7 @@ import { AssistantIaModule } from './modules/assistant-ia/assistant-ia.module';
     DocumentsModule,
     FacturationModule,
     NotificationsModule,
+    InvitationsModule,
     SyncModule,
     AssistantIaModule,
   ],

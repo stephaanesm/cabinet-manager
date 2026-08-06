@@ -26,6 +26,7 @@ import {
     saveUser
 } from '@/lib/secureStorage';
 import { clearSessionData } from '@/lib/offlineQueue';
+import { setCurrentUserSession } from '@/services/dossierInvitations.service';
 import { useRouter, useSegments } from 'expo-router';
 import React, {
     createContext,
@@ -68,6 +69,9 @@ interface AuthContextValue {
   isLoading: boolean;
   isAuthenticated: boolean;
   login: (email: string, motDePasse: string) => Promise<LoginOutcome>;
+  loginWithSocial: (provider: 'google' | 'apple', email: string, nom?: string) => Promise<void>;
+  sendOtp: (email: string) => Promise<{ success: boolean; message: string }>;
+  verifyOtp: (email: string, code: string) => Promise<{ verified: true; email: string }>;
   verify2fa: (preAuthToken: string, code: string) => Promise<void>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
@@ -99,16 +103,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
         // Token présent → on recharge le profil depuis le cache d'abord
         const cached = await getSavedUser<AuthUser>();
-        if (cached) setUser(cached);
+        if (cached) {
+          setUser(cached);
+          await setCurrentUserSession(cached.email);
+        }
 
         // Puis on valide avec le serveur (intercepteur gère le refresh si besoin)
         try {
           const { data } = await api.get<AuthUser>('/auth/me');
           setUser(data);
           await saveUser(data);
+          await setCurrentUserSession(data.email);
         } catch {
           // /auth/me a échoué (refresh également échoué) → déjà nettoyé par l'intercepteur
           setUser(null);
+          await setCurrentUserSession('');
         }
       } finally {
         setIsLoading(false);
@@ -171,9 +180,47 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const { data: profile } = await api.get<AuthUser>('/auth/me');
     setUser(profile);
     await saveUser(profile);
-    hasNavigated.current = false; // laisse l'effet de redirection tourner
+    await setCurrentUserSession(profile.email);
+    hasNavigated.current = false;
+
+    if (profile.role === 'Administrateur') {
+      router.replace('/admin' as any);
+    } else {
+      router.replace('/(tabs)');
+    }
 
     return { success: true };
+  }, [router]);
+
+  const loginWithSocial = useCallback(async (
+    provider: 'google' | 'apple',
+    email: string,
+    nom?: string,
+  ): Promise<void> => {
+    const { data } = await api.post<TokenPair>(`/auth/${provider}`, { email, nom });
+    await saveTokens(data.accessToken, data.refreshToken);
+    const { data: profile } = await api.get<AuthUser>('/auth/me');
+    setUser(profile);
+    await saveUser(profile);
+    await setCurrentUserSession(profile.email);
+    hasNavigated.current = false;
+    if (profile.role === 'Administrateur') {
+      router.replace('/admin' as any);
+    } else {
+      router.replace('/(tabs)');
+    }
+  }, [router]);
+
+  // ── OTP EMAIL VERIFICATION ────────────────────────────────────────────────
+
+  const sendOtp = useCallback(async (email: string) => {
+    const { data } = await api.post<{ success: boolean; message: string }>('/auth/send-code', { email });
+    return data;
+  }, []);
+
+  const verifyOtp = useCallback(async (email: string, code: string): Promise<{ verified: true; email: string }> => {
+    const { data } = await api.post<{ verified: true; email: string }>('/auth/verify-code', { email, code });
+    return data;
   }, []);
 
   // ── verify2fa ─────────────────────────────────────────────────────────────
@@ -192,8 +239,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const { data: profile } = await api.get<AuthUser>('/auth/me');
     setUser(profile);
     await saveUser(profile);
+    await setCurrentUserSession(profile.email);
     hasNavigated.current = false;
-  }, []);
+    if (profile.role === 'Administrateur') {
+      router.replace('/admin' as any);
+    } else {
+      router.replace('/(tabs)');
+    }
+  }, [router]);
 
   // ── logout ────────────────────────────────────────────────────────────────
 
@@ -201,28 +254,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const refreshToken = await getRefreshToken();
       if (refreshToken) {
-        await api.post('/auth/logout', { refreshToken }).catch(() => {
-          // Pas bloquant : on nettoie localement même si le serveur ne répond pas
-        });
+        await api.post('/auth/logout', { refreshToken });
       }
+    } catch {
+      // Ignore les erreurs réseau à la déconnexion
     } finally {
-      // Effacer les données offline de la session courante avant de nettoyer les tokens
       if (user?.cabinetId) {
         await clearSessionData(user.cabinetId).catch(() => {});
       }
       await clearAll();
+      await setCurrentUserSession('');
       setUser(null);
-      hasNavigated.current = true;
-      router.replace('/login');
+      hasNavigated.current = false;
     }
-  }, [router, user]);
-
-  // ── refreshUser ───────────────────────────────────────────────────────────
+  }, [user]);
 
   const refreshUser = useCallback(async (): Promise<void> => {
-    const { data } = await api.get<AuthUser>('/auth/me');
-    setUser(data);
-    await saveUser(data);
+    try {
+      const { data } = await api.get<AuthUser>('/auth/me');
+      setUser(data);
+      await saveUser(data);
+    } catch (e) {
+      console.warn('Erreur rafraîchissement profil:', e);
+    }
   }, []);
 
   const value: AuthContextValue = {
@@ -230,6 +284,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     isLoading,
     isAuthenticated: user !== null,
     login,
+    loginWithSocial,
+    sendOtp,
+    verifyOtp,
     verify2fa,
     logout,
     refreshUser,

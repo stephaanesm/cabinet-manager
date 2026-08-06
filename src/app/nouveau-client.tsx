@@ -8,6 +8,7 @@ import { useRouter } from 'expo-router';
 import { ArrowLeft, Save, User, Building2 } from 'lucide-react-native';
 import { AppColors as C } from '@/constants/theme';
 import { createClient } from '@/services/clients.service';
+import { ajouterAccèsClient } from '@/services/dossierInvitations.service';
 import { extractErrorMessage } from '@/lib/api';
 
 type ClientType = 'personne_physique' | 'personne_morale';
@@ -62,11 +63,14 @@ export default function NouveauClientScreen() {
     setError('');
     setIsLoading(true);
     try {
-      await createClient({
+      const created = await createClient({
         nomComplet,
         telephone: phone,
         email: mail,
       });
+      if (created?.id) {
+        ajouterAccèsClient(Number(created.id));
+      }
       Alert.alert('Succès', 'Client créé avec succès dans la base de données !', [
         { text: 'OK', onPress: () => router.back() },
       ]);
@@ -90,8 +94,16 @@ export default function NouveauClientScreen() {
         </View>
       </SafeAreaView>
 
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40, gap: 14 }} showsVerticalScrollIndicator={false}>
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 64 : 0}
+      >
+        <ScrollView
+          contentContainerStyle={{ padding: 16, paddingBottom: 160, gap: 14 }}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
           {/* Type selector */}
           <View style={sf.card}>
             <Text style={sf.sectionTitle}>Type de client</Text>

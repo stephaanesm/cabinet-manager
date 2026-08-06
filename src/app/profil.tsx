@@ -236,7 +236,7 @@ const s = StyleSheet.create({
   backBtn: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   backText: { fontSize: 13, color: C.gray400 },
   headerTitle: { fontSize: 16, fontWeight: '700', color: C.white },
-  scroll: { padding: 16, gap: 14, paddingBottom: 40 },
+  scroll: { padding: 16, gap: 14, paddingBottom: 160 },
   profileCard: {
     alignItems: 'center', backgroundColor: C.gray900, borderRadius: 20,
     padding: 20, shadowColor: C.black, shadowOffset: { width: 0, height: 2 },

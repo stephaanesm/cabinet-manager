@@ -7,10 +7,12 @@
 import { extractErrorMessage } from '@/lib/api';
 import { AppColors as C } from '@/constants/theme';
 import { useClients } from '@/hooks/useClients';
+import { useDossiers } from '@/hooks/useDossiers';
 import { createDossier } from '@/services/dossiers.service';
+import { ajouterAccèsDossier, hasDossierAccess, hasClientAccess } from '@/services/dossierInvitations.service';
 import { useRouter } from 'expo-router';
 import { ArrowLeft, Building2, FileText, Plus, Save, User } from 'lucide-react-native';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -26,23 +28,33 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 const JURIDICTIONS = [
-  'Tribunal de Grande Instance de Douala',
-  'Tribunal de Grande Instance de Yaoundé',
-  'Tribunal de Première Instance de Douala-Bonanjo',
-  'Tribunal de Première Instance de Yaoundé-Ekounou',
-  "Cour d'Appel du Littoral",
-  "Cour d'Appel du Centre",
-  'Tribunal Criminel Spécial (TCS)',
+  'TGI Douala (Bonanjo)',
+  'TGI Yaoundé (Centre)',
+  'Tribunal de Commerce Douala',
+  'Cour d\'Appel du Littoral',
   'Cour Suprême du Cameroun',
-  'Autre juridiction',
+  'Autre',
 ];
 
 export default function NouvelleAffaireScreen() {
   const router = useRouter();
   const { clients, isLoading: loadingClients } = useClients({ pageSize: 100 });
+  const { dossiers } = useDossiers({ pageSize: 100 });
+  const userDossierClientIds = dossiers
+    .filter(d => hasDossierAccess(Number(d.id)))
+    .map(d => Number(d.clientId));
+
+  const userClients = clients.filter(c => hasClientAccess(Number(c.id), userDossierClientIds));
 
   // Champs du formulaire
   const [selectedClientId, setSelectedClientId] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!selectedClientId && userClients.length > 0) {
+      setSelectedClientId(Number(userClients[0].id));
+    }
+  }, [userClients, selectedClientId]);
+
   const [titre, setTitre] = useState('');
   const [juridiction, setJuridiction] = useState('');
   const [notes, setNotes] = useState('');
@@ -67,6 +79,9 @@ export default function NouvelleAffaireScreen() {
         juridiction: juridiction.trim() || undefined,
         notes: notes.trim() || undefined,
       });
+      if (created?.id) {
+        ajouterAccèsDossier(Number(created.id));
+      }
       Alert.alert(
         'Dossier créé !',
         `Numéro : ${created.numeroAffaire}\nStatut : Ouvert`,
@@ -100,7 +115,11 @@ export default function NouvelleAffaireScreen() {
         </View>
       </SafeAreaView>
 
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 64 : 0}
+      >
         <ScrollView
           contentContainerStyle={s.scroll}
           showsVerticalScrollIndicator={false}
@@ -119,10 +138,10 @@ export default function NouvelleAffaireScreen() {
 
             {loadingClients ? (
               <ActivityIndicator color={C.amber500} style={{ marginVertical: 12 }} />
-            ) : clients.length === 0 ? (
+            ) : userClients.length === 0 ? (
               <View style={s.emptyClients}>
                 <User color={C.gray400} size={32} />
-                <Text style={s.emptyClientsTitle}>Aucun client dans le répertoire</Text>
+                <Text style={s.emptyClientsTitle}>Aucun client dans votre répertoire</Text>
                 <TouchableOpacity style={s.createClientBtn} onPress={() => router.push('/nouveau-client')}>
                   <Text style={s.createClientBtnText}>+ Créer un client d'abord</Text>
                 </TouchableOpacity>
@@ -133,7 +152,7 @@ export default function NouvelleAffaireScreen() {
                 showsHorizontalScrollIndicator={false}
                 contentContainerStyle={{ paddingBottom: 4 }}
               >
-                {clients.map((c) => {
+                {userClients.map((c) => {
                   const id = Number(c.id);
                   const isSelected = selectedClientId === id;
                   return (
@@ -276,7 +295,7 @@ const s = StyleSheet.create({
   },
   title: { fontSize: 20, fontWeight: '700', color: C.white },
   sub: { fontSize: 13, color: C.amber400, marginTop: 2 },
-  scroll: { padding: 16, paddingBottom: 48, gap: 14 },
+  scroll: { padding: 16, paddingBottom: 160, gap: 14 },
   section: {
     backgroundColor: C.white, borderRadius: 16, padding: 16,
     shadowColor: C.black, shadowOffset: { width: 0, height: 1 },

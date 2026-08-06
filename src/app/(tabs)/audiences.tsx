@@ -18,6 +18,7 @@ import { useAudiences } from '@/hooks/useAudiences';
 import { useDossiers } from '@/hooks/useDossiers';
 import { extractErrorMessage } from '@/lib/api';
 import { Audience } from '@/services/audiences.service';
+import { hasDossierAccess, hasAudienceAccess, ajouterAccèsAudience } from '@/services/dossierInvitations.service';
 import { DateTimePickerModal } from '@/components/DateTimePickerModal';
 import { useRouter } from 'expo-router';
 import {
@@ -72,6 +73,10 @@ export default function CalendrierScreen() {
   const { audiences, isLoading, error, refetch, create: createAudience } = useAudiences({ lazy: false });
   const { dossiers } = useDossiers({ pageSize: 50 });
 
+  // Isolation stricte des données de l'utilisateur
+  const userDossiers = useMemo(() => dossiers.filter(d => hasDossierAccess(Number(d.id))), [dossiers]);
+  const userAudiences = useMemo(() => audiences.filter(a => hasAudienceAccess(Number(a.id), a.dossierId ? Number(a.dossierId) : undefined)), [audiences]);
+
   // ── Calcul des 7 jours de la semaine affichée ─────────────────────────────
   const weekDays = useMemo(() => {
     const base = new Date();
@@ -108,21 +113,21 @@ export default function CalendrierScreen() {
   const selectedDateStr = toYYYYMMDD(selectedDate);
 
   const eventsOnSelectedDate = useMemo(() => {
-    return audiences.filter(a => {
+    return userAudiences.filter(a => {
       const aDateStr = new Date(a.dateAudience).toISOString().slice(0, 10);
       return aDateStr === selectedDateStr;
     }).sort((a, b) => (a.heure || '').localeCompare(b.heure || ''));
-  }, [audiences, selectedDateStr]);
+  }, [userAudiences, selectedDateStr]);
 
   // Map des dates ayant au moins un événement (pour les puces du calendrier)
   const eventsCountPerDate = useMemo(() => {
     const map: Record<string, number> = {};
-    audiences.forEach(a => {
+    userAudiences.forEach(a => {
       const dStr = new Date(a.dateAudience).toISOString().slice(0, 10);
       map[dStr] = (map[dStr] || 0) + 1;
     });
     return map;
-  }, [audiences]);
+  }, [userAudiences]);
 
   // ── Handlers de création d'événement / audience ────────────────────────────
 
@@ -132,7 +137,7 @@ export default function CalendrierScreen() {
     setEvtHeure('09:00');
     setEvtCategory('Audience');
     setEvtTitre('');
-    setEvtDossierId(dossiers[0]?.id ? Number(dossiers[0].id) : undefined);
+    setEvtDossierId(userDossiers[0]?.id ? Number(userDossiers[0].id) : undefined);
     setEvtLieu('');
     setEvtNotes('');
     setEvtImportant(true); // Les audiences sont d'office des événements importants
@@ -144,7 +149,7 @@ export default function CalendrierScreen() {
       Alert.alert('Erreur', 'La date de l\'événement est obligatoire.');
       return;
     }
-    const finalDossierId = Number(evtDossierId ?? dossiers[0]?.id ?? 1);
+    const finalDossierId = Number(evtDossierId ?? userDossiers[0]?.id ?? 1);
 
     setSavingEvt(true);
     try {
@@ -163,7 +168,7 @@ export default function CalendrierScreen() {
       // Format ISO 8601 valide pour dateAudience
       const formattedDate = new Date(`${evtDateStr}T${evtHeure || '09:00'}:00.000Z`).toISOString();
 
-      await createAudience({
+      const created = await createAudience({
         dossierId: finalDossierId,
         dateAudience: formattedDate,
         heure: evtHeure || '09:00',
@@ -172,6 +177,9 @@ export default function CalendrierScreen() {
         notes: notesCombined || undefined,
         statut: 'prevue',
       });
+      if (created?.id) {
+        ajouterAccèsAudience(Number(created.id));
+      }
 
       setShowAddModal(false);
       refetch();
@@ -468,11 +476,11 @@ export default function CalendrierScreen() {
               </View>
 
               {/* Sélection Dossier */}
-              {dossiers.length > 0 && (
+              {userDossiers.length > 0 && (
                 <View style={{ marginBottom: 12 }}>
                   <Text style={s.fieldLabel}>Lier à un dossier (Affaire)</Text>
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
-                    {dossiers.map(d => (
+                    {userDossiers.map(d => (
                       <TouchableOpacity
                         key={d.id}
                         onPress={() => setEvtDossierId(d.id)}

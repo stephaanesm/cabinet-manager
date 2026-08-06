@@ -8,6 +8,8 @@ import { CloudOff, RefreshCw } from 'lucide-react-native';
 import { useEffect } from 'react';
 import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, useColorScheme, View } from 'react-native';
 
+import { PreferencesProvider, usePreferences } from '@/context/PreferencesContext';
+
 SplashScreen.preventAutoHideAsync();
 
 /** Bandeau Hors-ligne — affiché globalement quand le réseau est absent */
@@ -50,30 +52,37 @@ function OfflineBanner() {
   );
 }
 
-export default function RootLayout() {
-  const colorScheme = useColorScheme();
+function AppNavigator() {
+  const { isDark } = usePreferences();
+  return (
+    <ThemeProvider value={isDark ? DarkTheme : DefaultTheme}>
+      <OfflineBanner />
+      <Stack screenOptions={{ headerShown: false }}>
+        <Stack.Screen name="index" />
+        <Stack.Screen name="login" />
+        <Stack.Screen name="register" />
+        <Stack.Screen name="(tabs)" />
+        <Stack.Screen name="admin" />
+        <Stack.Screen name="notifications" options={{ presentation: 'card' }} />
+        <Stack.Screen name="nouveau-client" options={{ presentation: 'card' }} />
+        <Stack.Screen name="nouvelle-affaire" options={{ presentation: 'card' }} />
+        <Stack.Screen name="affaire/[id]" options={{ presentation: 'card' }} />
+      </Stack>
+    </ThemeProvider>
+  );
+}
 
+export default function RootLayout() {
   useEffect(() => {
     SplashScreen.hideAsync();
   }, []);
 
   return (
-    <AuthProvider>
-      <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-        <OfflineBanner />
-        <Stack screenOptions={{ headerShown: false }}>
-          <Stack.Screen name="index" />
-          <Stack.Screen name="login" />
-          <Stack.Screen name="register" />
-          <Stack.Screen name="(tabs)" />
-          <Stack.Screen name="admin" />
-          <Stack.Screen name="notifications" options={{ presentation: 'card' }} />
-          <Stack.Screen name="nouveau-client" options={{ presentation: 'card' }} />
-          <Stack.Screen name="nouvelle-affaire" options={{ presentation: 'card' }} />
-          <Stack.Screen name="affaire/[id]" options={{ presentation: 'card' }} />
-        </Stack>
-      </ThemeProvider>
-    </AuthProvider>
+    <PreferencesProvider>
+      <AuthProvider>
+        <AppNavigator />
+      </AuthProvider>
+    </PreferencesProvider>
   );
 }
 

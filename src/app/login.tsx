@@ -1,11 +1,23 @@
+/**
+ * src/app/login.tsx
+ * Page de connexion — Email + Mot de passe uniquement.
+ * L'OTP est uniquement utilisé lors de l'INSCRIPTION pour vérifier l'email.
+ */
 import { AppColors as C } from '@/constants/theme';
 import { extractErrorMessage, useAuth } from '@/hooks/useAuth';
 import { useRouter } from 'expo-router';
-import { ArrowLeft, ChevronRight, Eye, EyeOff, Lock, Settings, Shield } from 'lucide-react-native';
+import { ArrowLeft, ChevronRight, Eye, EyeOff, Lock, Shield } from 'lucide-react-native';
 import { useState } from 'react';
 import {
-    ActivityIndicator, KeyboardAvoidingView, Platform,
-    ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View,
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -21,10 +33,11 @@ export default function LoginScreen() {
   const [showPassword, setShowPassword] = useState(false);
   const [code2fa, setCode2fa] = useState('');
   const [preAuthToken, setPreAuthToken] = useState('');
+
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
 
-  // ── Étape 1 : email + mot de passe ────────────────────────────────────────
+  // ── Connexion Email + Mot de passe ────────────────────────────────────────
 
   const handleCredentials = async () => {
     if (!email.trim() || !password) {
@@ -35,7 +48,6 @@ export default function LoginScreen() {
     setIsLoading(true);
     try {
       const outcome = await login(email.trim().toLowerCase(), password);
-
       if ('requiresTwoFactor' in outcome && outcome.requiresTwoFactor) {
         setPreAuthToken(outcome.preAuthToken);
         setStep('2fa');
@@ -46,10 +58,8 @@ export default function LoginScreen() {
         !msg ||
         msg.toLowerCase().includes('401') ||
         msg.toLowerCase().includes('unauthorized') ||
-        msg.toLowerCase().includes('incorrect') ||
         msg.toLowerCase().includes('invalide') ||
-        msg.toLowerCase().includes('credentials') ||
-        msg.toLowerCase().includes('failed')
+        msg.toLowerCase().includes('incorrect')
       ) {
         setError('Adresse email ou mot de passe incorrect. Veuillez ré-essayer.');
       } else {
@@ -60,7 +70,7 @@ export default function LoginScreen() {
     }
   };
 
-  // ── Étape 2 : code TOTP ───────────────────────────────────────────────────
+  // ── Vérification 2FA ──────────────────────────────────────────────────────
 
   const handle2FA = async () => {
     if (code2fa.length !== 6) return;
@@ -68,12 +78,13 @@ export default function LoginScreen() {
     setIsLoading(true);
     try {
       await verify2fa(preAuthToken, code2fa);
-      // useAuth redirige automatiquement vers /(tabs) après succès
     } catch (e) {
       const msg = extractErrorMessage(e);
-      setError(msg.toLowerCase().includes('invalide') || msg.toLowerCase().includes('invalid')
-        ? 'Code invalide. Vérifiez votre application d\'authentification.'
-        : msg);
+      setError(
+        msg.toLowerCase().includes('invalide') || msg.toLowerCase().includes('invalid')
+          ? "Code invalide. Vérifiez votre application d'authentification."
+          : msg,
+      );
       setCode2fa('');
     } finally {
       setIsLoading(false);
@@ -95,11 +106,12 @@ export default function LoginScreen() {
               <Text style={s.appSub}>Gestion d'Affaires Juridiques</Text>
             </View>
 
-            {/* ── Étape credentials ── */}
             {step === 'credentials' ? (
               <View style={s.form}>
+
+                {/* Email */}
                 <View style={s.field}>
-                  <Text style={s.label}>Email</Text>
+                  <Text style={s.label}>Adresse Email</Text>
                   <TextInput
                     style={s.input}
                     value={email}
@@ -113,6 +125,7 @@ export default function LoginScreen() {
                   />
                 </View>
 
+                {/* Mot de passe */}
                 <View style={s.field}>
                   <Text style={s.label}>Mot de passe</Text>
                   <View style={s.passWrap}>
@@ -135,25 +148,13 @@ export default function LoginScreen() {
                   </View>
                 </View>
 
-                {/* Info 2FA (informatif, géré par le serveur) */}
-                <View style={s.toggleRow}>
-                  <Shield color={C.amber400} size={18} />
-                  <View style={{ flex: 1, marginLeft: 10 }}>
-                    <Text style={s.toggleTitle}>Vérification en 2 étapes</Text>
-                    <Text style={s.toggleSub}>Activée selon votre profil de sécurité</Text>
-                  </View>
-                </View>
-
-                <TouchableOpacity style={s.forgotBtn}>
-                  <Text style={s.forgotText}>Mot de passe oublié ?</Text>
-                </TouchableOpacity>
-
                 {error !== '' && (
                   <View style={s.errorBox}>
                     <Text style={s.errorText}>{error}</Text>
                   </View>
                 )}
 
+                {/* Bouton connexion */}
                 <TouchableOpacity
                   style={[s.primaryBtn, (isLoading || !email || !password) && s.btnDisabled]}
                   onPress={handleCredentials}
@@ -167,6 +168,7 @@ export default function LoginScreen() {
                         <ChevronRight color={C.gray900} size={18} />
                       </>}
                 </TouchableOpacity>
+
               </View>
 
             ) : (
@@ -232,15 +234,6 @@ export default function LoginScreen() {
                 </TouchableOpacity>
               </View>
               <Text style={s.footerText}>Cabinet d'Avocats • Cameroun</Text>
-              <Text style={s.footerVersion}>Version 1.0.0 • Données chiffrées TLS</Text>
-              <TouchableOpacity
-                style={s.adminLink}
-                onPress={() => router.replace('/admin' as any)}
-                activeOpacity={0.7}
-              >
-                <Settings color={C.red500} size={14} />
-                <Text style={s.adminLinkText}>Accès Administrateur</Text>
-              </TouchableOpacity>
             </View>
 
           </ScrollView>
@@ -253,8 +246,8 @@ export default function LoginScreen() {
 const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: C.gray900 },
   safe: { flex: 1 },
-  scroll: { flexGrow: 1, paddingHorizontal: 24, paddingBottom: 32 },
-  logoWrap: { alignItems: 'center', marginTop: 40, marginBottom: 32 },
+  scroll: { flexGrow: 1, paddingHorizontal: 24, paddingBottom: 40 },
+  logoWrap: { alignItems: 'center', marginTop: 48, marginBottom: 36 },
   logoBox: {
     width: 80, height: 80, backgroundColor: C.amber500, borderRadius: 20,
     alignItems: 'center', justifyContent: 'center', marginBottom: 16,
@@ -276,15 +269,6 @@ const s = StyleSheet.create({
     borderColor: 'rgba(245,158,11,0.2)', borderRadius: 12, overflow: 'hidden',
   },
   eyeBtn: { paddingHorizontal: 12 },
-  toggleRow: {
-    flexDirection: 'row', alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)', borderRadius: 12, padding: 12,
-  },
-  toggleTitle: { fontSize: 14, fontWeight: '500', color: C.white },
-  toggleSub: { fontSize: 12, color: C.gray400, marginTop: 2 },
-  forgotBtn: { alignSelf: 'flex-start' },
-  forgotText: { fontSize: 14, color: C.amber400 },
   errorBox: {
     backgroundColor: 'rgba(239,68,68,0.2)', borderWidth: 1,
     borderColor: 'rgba(239,68,68,0.3)', borderRadius: 12, padding: 12,
@@ -314,12 +298,9 @@ const s = StyleSheet.create({
     fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
     letterSpacing: 16, color: C.white,
   },
-  footer: { alignItems: 'center', marginTop: 32, gap: 8 },
+  footer: { alignItems: 'center', marginTop: 36, gap: 8 },
   registerRow: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginBottom: 8 },
   registerText: { fontSize: 14, color: C.gray400 },
   registerLink: { fontSize: 14, color: C.amber400, fontWeight: '600' },
   footerText: { fontSize: 13, color: C.gray400 },
-  footerVersion: { fontSize: 11, color: C.gray600 },
-  adminLink: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8, paddingVertical: 6 },
-  adminLinkText: { fontSize: 12, color: C.red500, fontWeight: '500' },
 });

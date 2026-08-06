@@ -17,6 +17,7 @@ import {
   getNotifications, marquerNotificationCommeLue, marquerToutesNotificationsCommeLues,
   NotificationItem,
 } from '@/services/notifications.service';
+import { getUnreadBadgeCount, hasDossierAccess, hasAudienceAccess } from '@/services/dossierInvitations.service';
 import { useRouter } from 'expo-router';
 import {
   AlertTriangle, ArrowUpRight, BarChart3, Bell, Brain, Briefcase,
@@ -31,8 +32,16 @@ import {
   TextInput, TouchableOpacity, View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { AccountDrawer } from '@/components/AccountDrawer';
+import { DashboardAIChatBox } from '@/components/DashboardAIChatBox';
+import { usePreferences } from '@/context/PreferencesContext';
 
 type DashboardTab = 'overview' | 'agenda' | 'facturation';
+
+function initials(name?: string) {
+  if (!name) return 'AV';
+  return name.split(' ').map(p => p[0]).join('').substring(0, 2).toUpperCase();
+}
 
 const DASHBOARD_TABS: { id: DashboardTab; label: string; Icon: any }[] = [
   { id: 'overview',    label: "Vue d'ensemble", Icon: LayoutDashboard },
@@ -43,7 +52,11 @@ const DASHBOARD_TABS: { id: DashboardTab; label: string; Icon: any }[] = [
 export default function DashboardScreen() {
   const router = useRouter();
   const { user, logout } = useAuth();
+  const { isDark } = usePreferences();
   const [activeTab, setActiveTab] = useState<DashboardTab>('overview');
+
+  // Modal Dragger Compte & Thème & Notifications
+  const [showDrawer, setShowDrawer] = useState(false);
 
   // Modal Pop-up Notifications
   const [showNotifPopUp, setShowNotifPopUp] = useState(false);
@@ -68,26 +81,23 @@ export default function DashboardScreen() {
   const [factDesc, setFactDesc]               = useState('');
   const [creatingFact, setCreatingFact]       = useState(false);
 
-  // Chargement des notifications réelles du backend (silencieux si indisponible)
+  // Chargement des notifications réelles du backend & comptage des badges
   const fetchNotifs = useCallback(async () => {
     setLoadingNotifs(true);
     try {
-      const res = await getNotifications();
-      setNotifs(res.data);
-      setNonLues(res.nonLuesCount);
+      const res = await getNotifications().catch(() => ({ data: [], nonLuesCount: 0 }));
+      const customBadgeCount = getUnreadBadgeCount(user?.email);
+      const totalUnread = customBadgeCount + (res.nonLuesCount || 0);
+
+      setNotifs(res.data || []);
+      setNonLues(totalUnread);
     } catch (e: any) {
-      // 404 = table notifications pas encore migrée, ou endpoint indisponible
-      // On ne bloque pas l'UI : la cloche reste accessible mais vide
-      const status = e?.response?.status;
-      if (status !== 404 && status !== 401) {
-        console.log('[Notifications] Erreur de chargement (status:', status, ')');
-      }
       setNotifs([]);
-      setNonLues(0);
+      setNonLues(getUnreadBadgeCount(user?.email));
     } finally {
       setLoadingNotifs(false);
     }
-  }, []);
+  }, [user?.email]);
 
   useEffect(() => {
     fetchNotifs();
@@ -99,7 +109,7 @@ export default function DashboardScreen() {
       setNotifs(prev => prev.map(n => ({ ...n, lu: true })));
       setNonLues(0);
     } catch (e) {
-      console.log('Error mark all read:', e);
+      console.log('Erreur marquer lues:', e);
     }
   };
 
@@ -125,28 +135,24 @@ export default function DashboardScreen() {
     setShowFactureModal(true);
   };
 
-  const handleCreateFacture = async () => {
+  const handleCreateFactureSubmit = async () => {
     if (!factMontantHt || isNaN(Number(factMontantHt)) || Number(factMontantHt) <= 0) {
-      Alert.alert('Erreur', 'Veuillez saisir un montant Hors Taxe valide.');
+      Alert.alert('Erreur', 'Veuillez saisir un montant HT valide.');
       return;
     }
     const dossierSelected = dossiers.find(d => Number(d.id) === Number(factDossierId));
-    if (!dossierSelected) {
-      Alert.alert('Erreur', 'Veuillez sélectionner un dossier.');
-      return;
-    }
-
     setCreatingFact(true);
     try {
       await createFacture({
-        dossierId: Number(dossierSelected.id),
-        clientId: Number(dossierSelected.clientId),
+        dossierId: factDossierId ?? 0,
+        clientId: dossierSelected ? Number(dossierSelected.clientId) : 1,
         montantHt: Number(factMontantHt),
-        tauxTva: Number(factTva) || 19.25,
+        tauxTva: Number(factTva),
         dateEcheance: factEcheance || undefined,
-        description: factDesc.trim() || undefined,
+        description: factDesc || undefined,
       });
-
+      setFactMontantHt('');
+      setFactDesc('');
       setShowFactureModal(false);
       refetchFactures();
       Alert.alert('Succès', 'Facture créée avec succès.');
@@ -180,19 +186,24 @@ export default function DashboardScreen() {
     );
   };
 
-  const affairesActives = dossiers.filter(
+  // Filtrage strict des données réservées à l'utilisateur
+  const userDossiers  = dossiers.filter(d => hasDossierAccess(Number(d.id)));
+  const userAudiences = audiences.filter(a => hasAudienceAccess(Number(a.id), a.dossierId ? Number(a.dossierId) : undefined));
+  const userFactures  = factures.filter(f => !f.dossierId || hasDossierAccess(Number(f.dossierId)));
+
+  const affairesActives = userDossiers.filter(
     d => d.statut === 'Ouvert' || d.statut === 'En cours'
   ).length;
-  const affairesCloturees = dossiers.filter(d => d.statut === 'Cloture').length;
-  const facturesRetard = factures.filter(f => f.statut === 'en_retard');
+  const affairesCloturees = userDossiers.filter(d => d.statut === 'Cloture').length;
+  const facturesRetard = userFactures.filter(f => f.statut === 'en_retard');
 
   const todayStr = new Date().toISOString().slice(0, 10);
-  const todayAudiences = audiences.filter(a => a.dateAudience?.startsWith(todayStr));
+  const todayAudiences = userAudiences.filter(a => a.dateAudience?.startsWith(todayStr));
 
   // Vérification automatique des rappels 30 min avant les événements
   useEffect(() => {
-    if (audiences.length > 0) {
-      const remList = audiences.map(a => ({
+    if (userAudiences.length > 0) {
+      const remList = userAudiences.map(a => ({
         id: a.id,
         titre: a.typeAudience || 'Événement Cabinet',
         dateStr: a.dateAudience ? a.dateAudience.slice(0, 10) : '',
@@ -200,34 +211,40 @@ export default function DashboardScreen() {
       }));
       checkUpcomingEventReminders(remList);
     }
-  }, [audiences]);
+  }, [userAudiences]);
 
-  const affairesRecentes = dossiers
+  const affairesRecentes = userDossiers
     .filter(d => d.statut === 'Ouvert' || d.statut === 'En cours')
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
     .slice(0, 4);
 
   return (
-    <View style={s.root}>
+    <View style={[s.root, { backgroundColor: isDark ? C.gray900 : C.gray100 }]}>
       <StatusBar barStyle="light-content" backgroundColor={C.navy900} />
       <SafeAreaView style={s.safe} edges={['top']}>
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 100 }}>
 
-          {/* ── En-tête Executive avec Cloche Notifications & Déconnexion à droite ── */}
+          {/* ── En-tête Executive avec Avatar & Nom Avocat (Ouvre le Dragger) ── */}
           <View style={s.header}>
-            <View style={{ flex: 1 }}>
-              <Text style={s.headerGreeting}>Cabinet d'Avocats</Text>
-              <Text style={s.headerTitle}>{user ? user.nom : 'Cabinet Manager'}</Text>
-              <View style={s.roleBadge}>
-                <ShieldCheck color={C.amber400} size={12} />
-                <Text style={s.roleBadgeText}>{user?.role || 'Associé'}</Text>
+            <TouchableOpacity
+              style={s.headerProfileTouch}
+              onPress={() => setShowDrawer(true)}
+              activeOpacity={0.8}
+            >
+              <View style={s.avatarCircle}>
+                <Text style={s.avatarText}>{initials(user?.nom || 'Avocat')}</Text>
               </View>
-            </View>
-            <View style={s.headerRight}>
-              <TouchableOpacity style={s.iconBtn} onPress={() => router.push('/assistant-ia')}>
-                <Brain color={C.amber400} size={20} />
-              </TouchableOpacity>
+              <View style={{ flex: 1 }}>
+                <Text style={s.headerGreeting}>Cabinet d'Avocats</Text>
+                <Text style={s.headerTitle}>{user ? user.nom : 'Maître Avocat'}</Text>
+                <View style={s.roleBadge}>
+                  <ShieldCheck color={C.amber400} size={12} />
+                  <Text style={s.roleBadgeText}>{user?.role || 'Avocat'} — Mon Compte ⚙️</Text>
+                </View>
+              </View>
+            </TouchableOpacity>
 
+            <View style={s.headerRight}>
               {/* 🔔 Icône Cloche Notifications Pop-up */}
               <TouchableOpacity
                 style={s.bellBtn}
@@ -247,6 +264,11 @@ export default function DashboardScreen() {
                 <LogOut color={C.red400} size={18} />
               </TouchableOpacity>
             </View>
+          </View>
+
+          {/* ── BOÎTE DE DIALOGUE ASSISTANT IA (PRÉSENTE SUR TOUTES LES VUES & AU-DESSUS DES AFFAIRES) ── */}
+          <View style={{ paddingHorizontal: 16 }}>
+            <DashboardAIChatBox />
           </View>
 
           {/* ── Navigation par Onglets Dashboard ── */}
@@ -283,7 +305,7 @@ export default function DashboardScreen() {
 
                 <View style={[s.kpiCard, { borderLeftColor: C.blue500 }]}>
                   <View style={[s.kpiIconWrap, { backgroundColor: C.blue50 }]}><CalendarIcon color={C.blue600} size={20} /></View>
-                  <Text style={s.kpiVal}>{audiences.length}</Text>
+                  <Text style={s.kpiVal}>{userAudiences.length}</Text>
                   <Text style={s.kpiLabel}>Audiences</Text>
                 </View>
 
@@ -610,7 +632,7 @@ export default function DashboardScreen() {
           <TouchableOpacity style={s.sheetNotif} activeOpacity={1} onPress={() => {}}>
             <View style={s.handle} />
             <Text style={{ fontSize: 17, fontWeight: '700', color: C.gray900, marginBottom: 14 }}>Nouvelle Facture d'Honoraires</Text>
-            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 160 }}>
 
               {/* Dossier */}
               <View style={{ marginBottom: 12 }}>
@@ -693,7 +715,7 @@ export default function DashboardScreen() {
 
               <TouchableOpacity
                 style={[{ backgroundColor: C.amber500, borderRadius: 12, paddingVertical: 14, alignItems: 'center', marginTop: 6 }, creatingFact && { opacity: 0.6 }]}
-                onPress={handleCreateFacture}
+                onPress={handleCreateFactureSubmit}
                 disabled={creatingFact}
                 activeOpacity={0.85}
               >
@@ -707,6 +729,9 @@ export default function DashboardScreen() {
           </TouchableOpacity>
         </TouchableOpacity>
       </Modal>
+
+      {/* ── DRAGGER UTILISATEUR & PARAMÈTRES (PROFIL / THÈME / NOTIFICATIONS) ── */}
+      <AccountDrawer visible={showDrawer} onClose={() => setShowDrawer(false)} />
     </View>
   );
 }
@@ -720,6 +745,27 @@ const s = StyleSheet.create({
   },
   headerGreeting: { fontSize: 12, color: C.gray400, fontWeight: '500' },
   headerTitle: { fontSize: 20, fontWeight: '700', color: C.white, marginTop: 2 },
+  headerProfileTouch: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  avatarCircle: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: C.amber500,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: 'rgba(255,255,255,0.2)',
+  },
+  avatarText: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: C.gray900,
+  },
   roleBadge: {
     flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4,
     backgroundColor: C.navy800, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, alignSelf: 'flex-start',

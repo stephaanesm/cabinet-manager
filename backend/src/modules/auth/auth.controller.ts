@@ -28,26 +28,74 @@ export class AuthController {
     @Req() req: Request,
   ) {
     const appareilId = (req.headers['x-device-id'] as string) ?? 'unknown';
-    return this.authService.login(body.email, body.motDePasse, appareilId);
+    return this.authService.login(body.email, body.motDePasse || (body as any).password, appareilId);
   }
 
-  // ── Inscription publique ──────────────────────────────────────────────────
-  /**
-   * POST /api/v1/auth/register
-   * Crée un compte utilisateur inactif (actif = false).
-   * Corps attendu : { nom, email, motDePasse, role }
-   * Retourne 201 avec { message, user } en cas de succès.
-   */
+  // ── Inscription publique (Avocat) ────────────────────────────────────────
+
   @Public()
   @Post('register')
   @HttpCode(HttpStatus.CREATED)
   async register(@Body() dto: RegisterDto) {
     return this.authService.register({
       nom: dto.nom,
+      prenom: dto.prenom,
       email: dto.email,
+      telephone: dto.telephone,
+      dateNaissance: dto.dateNaissance,
       motDePasse: dto.motDePasse,
       role: dto.role,
     });
+  }
+
+  // ── Connexion Sociale Google / Apple ──────────────────────────────────────
+
+  @Public()
+  @Post('google')
+  @HttpCode(HttpStatus.OK)
+  async googleLogin(@Body() body: { email?: string; nom?: string; idToken?: string }, @Req() req: Request) {
+    const appareilId = (req.headers['x-device-id'] as string) ?? 'google-auth';
+    return this.authService.loginWithSocial({ email: body.email, idToken: body.idToken, provider: 'google', nom: body.nom, appareilId });
+  }
+
+  @Public()
+  @Post('apple')
+  @HttpCode(HttpStatus.OK)
+  async appleLogin(@Body() body: { email?: string; nom?: string; identityToken?: string }, @Req() req: Request) {
+    const appareilId = (req.headers['x-device-id'] as string) ?? 'apple-auth';
+    return this.authService.loginWithSocial({ email: body.email, identityToken: body.identityToken, provider: 'apple', nom: body.nom, appareilId });
+  }
+
+  // ── Authentification par Code OTP Email ───────────────────────────────────
+
+  @Public()
+  @Post('send-code')
+  @HttpCode(HttpStatus.OK)
+  async sendCode(@Body() body: { email: string }) {
+    return this.authService.sendOtp(body.email);
+  }
+
+  @Public()
+  @Post('send-otp')
+  @HttpCode(HttpStatus.OK)
+  async sendOtp(@Body() body: { email: string }) {
+    return this.authService.sendOtp(body.email);
+  }
+
+  @Public()
+  @Post('verify-code')
+  @HttpCode(HttpStatus.OK)
+  async verifyCode(@Body() body: { email: string; code: string }, @Req() req: Request) {
+    const appareilId = (req.headers['x-device-id'] as string) ?? 'otp-auth';
+    return this.authService.verifyOtp(body.email, body.code, appareilId);
+  }
+
+  @Public()
+  @Post('verify-otp')
+  @HttpCode(HttpStatus.OK)
+  async verifyOtp(@Body() body: { email: string; code: string }, @Req() req: Request) {
+    const appareilId = (req.headers['x-device-id'] as string) ?? 'otp-auth';
+    return this.authService.verifyOtp(body.email, body.code, appareilId);
   }
 
   // ── Refresh token ─────────────────────────────────────────────────────────
@@ -79,12 +127,7 @@ export class AuthController {
   }
 
   // ── Enregistrement du token Expo Push ───────────────────────────
-  /**
-   * POST /api/v1/auth/push-token
-   * L'app mobile l'appelle au démarrage avec l'Expo Push Token de l'appareil.
-   * Ce token est ensuite utilisé par MessagingService pour envoyer des
-   * notifications push natives (FCM sur Android, APNs sur iOS).
-   */
+
   @Post('push-token')
   @HttpCode(HttpStatus.NO_CONTENT)
   async enregistrerPushToken(

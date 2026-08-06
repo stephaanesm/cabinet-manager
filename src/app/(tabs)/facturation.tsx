@@ -11,6 +11,7 @@ import { extractErrorMessage } from '@/lib/api';
 import {
   Facture, FactureStatut, getSoldeRestant, getTauxRecouvrement,
 } from '@/services/facturation.service';
+import { hasDossierAccess } from '@/services/dossierInvitations.service';
 import { useRouter } from 'expo-router';
 import {
   AlertTriangle, CheckCircle, Clock,
@@ -67,21 +68,29 @@ export default function FacturationScreen() {
 
   const { dossiers } = useDossiers({ pageSize: 50 });
 
-  const facturesRetard = factures.filter(f => f.statut === 'en_retard');
+  const userDossiers = dossiers.filter(d => hasDossierAccess(Number(d.id)));
+  const userFactures = factures.filter(f => f.dossierId && hasDossierAccess(Number(f.dossierId)));
+
+  const userTotalFacture  = userFactures.reduce((acc, f) => acc + Number(f.montantTtc || 0), 0);
+  const userTotalEncaisse = userFactures.reduce((acc, f) => acc + Number(f.montantEncaisse || 0), 0);
+  const userTotalImpaye   = Math.max(0, userTotalFacture - userTotalEncaisse);
+  const userTaux          = userTotalFacture > 0 ? Math.round((userTotalEncaisse / userTotalFacture) * 100) : 0;
+
+  const facturesRetard = userFactures.filter(f => f.statut === 'en_retard');
 
   const filtered = search.trim()
-    ? factures.filter(f =>
+    ? userFactures.filter(f =>
         f.numeroFacture.toLowerCase().includes(search.toLowerCase()) ||
         (f.description ?? '').toLowerCase().includes(search.toLowerCase())
       )
-    : factures;
+    : userFactures;
 
   const countByStatut = useCallback((s: FactureStatut) =>
-    factures.filter(f => f.statut === s).length, [factures]);
+    userFactures.filter(f => f.statut === s).length, [userFactures]);
 
   // Handlers Création Facture
   const handleOpenCreateModal = () => {
-    if (dossiers.length > 0) setFactDossierId(Number(dossiers[0].id));
+    if (userDossiers.length > 0) setFactDossierId(Number(userDossiers[0].id));
     setFactMontantHt('');
     setFactTva('19.25');
     const defaultEch = new Date();
@@ -96,7 +105,7 @@ export default function FacturationScreen() {
       Alert.alert('Erreur', 'Veuillez saisir un montant Hors Taxe valide.');
       return;
     }
-    const dossierSelected = dossiers.find(d => Number(d.id) === Number(factDossierId));
+    const dossierSelected = userDossiers.find(d => Number(d.id) === Number(factDossierId));
     if (!dossierSelected) {
       Alert.alert('Erreur', 'Veuillez sélectionner un dossier.');
       return;
@@ -219,7 +228,7 @@ export default function FacturationScreen() {
           <View>
             <Text style={s.title}>Facturation</Text>
             <Text style={s.sub}>
-              {isLoading ? 'Chargement…' : `${total} facture${total !== 1 ? 's' : ''}`}
+              {isLoading ? 'Chargement…' : `${userFactures.length} facture${userFactures.length !== 1 ? 's' : ''}`}
             </Text>
           </View>
           <TouchableOpacity style={s.addBtn} onPress={handleOpenCreateModal} activeOpacity={0.8}>
@@ -231,11 +240,11 @@ export default function FacturationScreen() {
         {/* KPIs */}
         <View style={s.kpiGrid}>
           {[
-            { label: 'Total facturé',     val: totalFacture  > 0 ? `${(totalFacture  / 1_000_000).toFixed(1)}M` : '0',  color: C.white },
-            { label: 'Total encaissé',    val: totalEncaisse > 0 ? `${(totalEncaisse / 1_000_000).toFixed(1)}M` : '0',  color: '#86efac' },
-            { label: 'Impayé',            val: totalImpaye   > 0 ? `${(totalImpaye   / 1_000_000).toFixed(1)}M` : '0',  color: '#fca5a5' },
-            { label: 'Taux recouvrement', val: `${tauxRecouvrement}%`,
-              color: tauxRecouvrement >= 75 ? '#86efac' : tauxRecouvrement >= 50 ? C.amber400 : '#fca5a5' },
+            { label: 'Total facturé',     val: userTotalFacture  > 0 ? `${(userTotalFacture  / 1_000_000).toFixed(1)}M` : '0',  color: C.white },
+            { label: 'Total encaissé',    val: userTotalEncaisse > 0 ? `${(userTotalEncaisse / 1_000_000).toFixed(1)}M` : '0',  color: '#86efac' },
+            { label: 'Impayé',            val: userTotalImpaye   > 0 ? `${(userTotalImpaye   / 1_000_000).toFixed(1)}M` : '0',  color: '#fca5a5' },
+            { label: 'Taux recouvrement', val: `${userTaux}%`,
+              color: userTaux >= 75 ? '#86efac' : userTaux >= 50 ? C.amber400 : '#fca5a5' },
           ].map(k => (
             <View key={k.label} style={s.kpiCard}>
               <Text style={s.kpiLabel}>{k.label}</Text>
@@ -289,7 +298,7 @@ export default function FacturationScreen() {
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.filterRow}>
         {FILTER_ORDER.map(st => {
           const active = statut === st;
-          const count  = st === 'all' ? total : countByStatut(st);
+          const count  = st === 'all' ? userFactures.length : countByStatut(st);
           const label  = st === 'all' ? 'Toutes' : STATUT_CFG[st].label;
           return (
             <TouchableOpacity
@@ -352,7 +361,7 @@ export default function FacturationScreen() {
               <View style={{ marginBottom: 12 }}>
                 <Text style={s.fieldLabel}>Dossier / Affaire concernée *</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
-                  {dossiers.map(d => (
+                  {userDossiers.map(d => (
                     <TouchableOpacity
                       key={d.id}
                       onPress={() => setFactDossierId(Number(d.id))}

@@ -7,6 +7,7 @@
 import { AppColors as C } from '@/constants/theme';
 import { useDossiers } from '@/hooks/useDossiers';
 import { deleteDossier, Dossier, DossierStatut } from '@/services/dossiers.service';
+import { hasDossierAccess } from '@/services/dossierInvitations.service';
 import { extractErrorMessage } from '@/lib/api';
 import { useRouter } from 'expo-router';
 import { AlertCircle, Briefcase, ChevronRight, Plus, Search, Trash2 } from 'lucide-react-native';
@@ -43,12 +44,14 @@ export default function AffairesScreen() {
       statut: selectedStatut !== 'all' ? selectedStatut : undefined,
     });
 
+  const accessibleDossiers = dossiers.filter(d => hasDossierAccess(Number(d.id)));
+
   const filtered = search.trim()
-    ? dossiers.filter(d => {
+    ? accessibleDossiers.filter(d => {
         const q = search.toLowerCase();
         return d.titre.toLowerCase().includes(q) || d.numeroAffaire.toLowerCase().includes(q);
       })
-    : dossiers;
+    : accessibleDossiers;
 
   const handleStatutChange = useCallback((val: 'all' | DossierStatut) => {
     setSelectedStatut(val);
@@ -114,7 +117,7 @@ export default function AffairesScreen() {
           <View style={{ flex: 1 }}>
             <Text style={s.title}>Affaires & Dossiers</Text>
             <Text style={s.subtitle}>
-              {total > 0 ? `${total} affaire(s) enregistrée(s)` : 'Gestion du contentieux'}
+              {accessibleDossiers.length > 0 ? `${accessibleDossiers.length} affaire(s) enregistrée(s)` : 'Gestion du contentieux'}
             </Text>
           </View>
           <TouchableOpacity

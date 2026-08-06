@@ -13,6 +13,8 @@ import { useDocuments } from '@/hooks/useDocuments';
 import { useFactures } from '@/hooks/useFactures';
 import { cloturerDossier, deleteDossier, DossierStatut, updateDossier } from '@/services/dossiers.service';
 import { Document as DocItem, DocumentConfidentialite, getDocumentDownloadUrl } from '@/services/documents.service';
+import { envoyerInvitationDossierApi, demanderPermissionConsultation, hasConsultationPermission } from '@/services/dossierInvitations.service';
+import { useAuth } from '@/hooks/useAuth';
 import { apercuAvecAppCompatible, getMimeType, telechargerDansTelephone } from '@/lib/fileViewerManager';
 import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
@@ -23,7 +25,7 @@ import {
   AlertCircle, ArrowLeft, Calendar, Camera, CheckCircle2, ChevronLeft, ChevronRight, Clock,
   DollarSign, Download, ExternalLink, Eye, FileSpreadsheet, FileText, Globe,
   Image as ImageIcon, Lock, Paperclip, Pencil, Plus, RefreshCw, Scan, Share2,
-  ShieldAlert, Trash2, Upload, X,
+  ShieldAlert, Trash2, Upload, X, UserPlus, Send, Key, Mail,
 } from 'lucide-react-native';
 import { useState } from 'react';
 import {
@@ -32,12 +34,13 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-type Tab = 'resume' | 'audiences' | 'documents' | 'finances';
+type Tab = 'resume' | 'audiences' | 'documents' | 'finances' | 'inviter';
 const TABS: { id: Tab; label: string; Icon: any }[] = [
   { id: 'resume',    label: 'Résumé',    Icon: FileText },
   { id: 'audiences', label: 'Agenda',    Icon: Calendar },
   { id: 'documents', label: 'Documents', Icon: FileText },
   { id: 'finances',  label: 'Finances',  Icon: DollarSign },
+  { id: 'inviter',   label: 'Inviter',   Icon: UserPlus },
 ];
 
 const STATUT_COLORS: Record<string, { bg: string; text: string }> = {
@@ -120,6 +123,46 @@ const AGENDA_CATEGORIES: { id: EventCategory; label: string; icon: string }[] = 
   const { audiences, refetch: refetchAud, create: createAud } = useAudiences({ dossierId, lazy: false });
   const { documents, refetch: refetchDoc, create: createDoc, remove: removeDoc } = useDocuments({ dossierId, lazy: false });
   const { factures, totalFacture, totalEncaisse, totalImpaye } = useFactures({ dossierId });
+
+  const { user } = useAuth();
+
+  // State Invitation au Dossier
+  const [inviteEmail, setInviteEmail]       = useState('');
+  const [invitePassword, setInvitePassword] = useState('');
+  const [sendingInvite, setSendingInvite]   = useState(false);
+
+  const handleSendInvitation = async () => {
+    const email = inviteEmail.trim().toLowerCase();
+    const pass = invitePassword.trim();
+    if (!email) {
+      Alert.alert('Champ requis', 'Veuillez saisir l\'adresse email du destinataire.');
+      return;
+    }
+    if (!pass) {
+      Alert.alert('Mot de passe requis', 'Entrez votre mot de passe pour confirmer l\'envoi de l\'invitation.');
+      return;
+    }
+
+    setSendingInvite(true);
+    try {
+      await envoyerInvitationDossierApi({
+        dossierId,
+        destinataireEmail: email,
+        motDePasse: pass,
+      });
+
+      setInviteEmail('');
+      setInvitePassword('');
+      Alert.alert(
+        '✅ Invitation transmise !',
+        `L'invitation au dossier ${dossier?.numeroAffaire} a été créée en base de données et envoyée dans les notifications 🔔 de ${email}.`,
+      );
+    } catch (e: any) {
+      Alert.alert('❌ Échec de l\'invitation', extractErrorMessage(e));
+    } finally {
+      setSendingInvite(false);
+    }
+  };
 
   if (isLoading) {
     return (
@@ -716,6 +759,82 @@ const AGENDA_CATEGORIES: { id: EventCategory; label: string; icon: string }[] = 
               </View>
             ))}
           </>
+        )}
+
+        {/* ── ONGLET INVITER UNE PERSONNE ── */}
+        {activeTab === 'inviter' && (
+          <View style={s.card}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+              <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: C.amber100, alignItems: 'center', justifyContent: 'center' }}>
+                <UserPlus color={C.amber700} size={20} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={s.cardTitle}>Inviter une personne au dossier</Text>
+                <Text style={{ fontSize: 12, color: C.gray500 }}>
+                  Partagez les accès de cette affaire en envoyant une invitation sécurisée par email.
+                </Text>
+              </View>
+            </View>
+
+            <View style={{ gap: 14, marginTop: 8 }}>
+              <View>
+                <Text style={{ fontSize: 12, fontWeight: '600', color: C.gray400, marginBottom: 6 }}>
+                  Adresse Email de la personne à inviter *
+                </Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: C.gray800, borderRadius: 12, paddingHorizontal: 12, borderWidth: 1, borderColor: C.gray700 }}>
+                  <Mail color={C.amber500} size={18} />
+                  <TextInput
+                    style={{ flex: 1, height: 46, color: C.white, fontSize: 14 }}
+                    value={inviteEmail}
+                    onChangeText={setInviteEmail}
+                    placeholder="ex: confrere@cabinet.cm"
+                    placeholderTextColor={C.gray500}
+                    keyboardType="email-address"
+                    autoCapitalize="none"
+                  />
+                </View>
+              </View>
+
+              <View>
+                <Text style={{ fontSize: 12, fontWeight: '600', color: C.gray400, marginBottom: 6 }}>
+                  Votre Mot de Passe (Confirmation de sécurité) *
+                </Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: C.gray800, borderRadius: 12, paddingHorizontal: 12, borderWidth: 1, borderColor: C.gray700 }}>
+                  <Key color={C.amber500} size={18} />
+                  <TextInput
+                    style={{ flex: 1, height: 46, color: C.white, fontSize: 14 }}
+                    value={invitePassword}
+                    onChangeText={setInvitePassword}
+                    placeholder="Saisissez votre mot de passe..."
+                    placeholderTextColor={C.gray500}
+                    secureTextEntry
+                  />
+                </View>
+              </View>
+
+              <TouchableOpacity
+                style={{
+                  flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+                  backgroundColor: C.amber500, borderRadius: 14, paddingVertical: 14, marginTop: 10,
+                  opacity: (sendingInvite || !inviteEmail.trim() || !invitePassword.trim()) ? 0.6 : 1,
+                }}
+                onPress={handleSendInvitation}
+                disabled={sendingInvite || !inviteEmail.trim() || !invitePassword.trim()}
+                activeOpacity={0.85}
+              >
+                {sendingInvite ? (
+                  <ActivityIndicator color={C.gray900} size="small" />
+                ) : (
+                  <>
+                    <Send color={C.gray900} size={18} />
+                    <Text style={{ fontSize: 14, fontWeight: '700', color: C.gray900 }}>
+                      Envoyer l'invitation
+                    </Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
         )}
       </ScrollView>
 

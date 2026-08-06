@@ -49,3 +49,7 @@ export async function marquerToutesNotificationsCommeLues(): Promise<{ count: nu
   const { data } = await api.patch<{ count: number }>('/notifications/lire-tout');
   return data;
 }
+
+export async function supprimerNotification(id: number): Promise<void> {
+  await api.delete(`/notifications/${id}`);
+}

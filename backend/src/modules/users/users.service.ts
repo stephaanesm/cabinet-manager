@@ -23,7 +23,10 @@ export interface SafeUserProfile {
 
 export interface CreateUserParams {
   nom: string;
+  prenom?: string;
   email: string;
+  telephone?: string;
+  dateNaissance?: string;
   motDePasse: string;
   role: RoleLibelle;
   /** Si non fourni, utilise le premier cabinet disponible (mode démo) */
@@ -85,22 +88,18 @@ export class UsersService {
       });
     }
 
-    // 3. Cabinet cible
+    // 3. Cabinet cible (création automatique de cabinet si non fourni)
     let resolvedCabinetId = cabinetId;
     if (!resolvedCabinetId) {
-      const result: { id: number }[] = await this.utilisateurRepository.query(
-        'SELECT id FROM cabinets WHERE actif = true ORDER BY id LIMIT 1',
+      const res = await this.utilisateurRepository.query(
+        'INSERT INTO cabinets (nom, actif) VALUES ($1, true) RETURNING id',
+        [`Cabinet de ${nom.trim()}`],
       );
-      if (!result || result.length === 0) {
-        throw new NotFoundException({
-          error: {
-            code: 'NOT_FOUND',
-            message: 'Aucun cabinet actif trouvé. Contactez l\'administrateur.',
-            status: 404,
-          },
-        });
+      if (res && res.length > 0) {
+        resolvedCabinetId = Number(res[0].id);
+      } else {
+        resolvedCabinetId = 1;
       }
-      resolvedCabinetId = Number(result[0].id);
     }
 
     // 4. Hash argon2id
@@ -194,6 +193,32 @@ export class UsersService {
     user.updatedAt = new Date();
     const updated = await this.utilisateurRepository.save(user);
     return this.toSafeProfile(updated);
+  }
+
+  /** Supprimer un compte utilisateur (soft delete) */
+  async deleteUser(id: number, cabinetId: number, currentUserId: number): Promise<{ success: boolean; message: string }> {
+    if (Number(id) === Number(currentUserId)) {
+      throw new ConflictException({
+        error: { code: 'CANNOT_DELETE_SELF', message: 'Vous ne pouvez pas supprimer votre propre compte.', status: 400 },
+      });
+    }
+
+    const user = await this.utilisateurRepository.findOne({
+      where: { id, cabinetId, deletedAt: IsNull() },
+    });
+
+    if (!user) {
+      throw new NotFoundException({
+        error: { code: 'NOT_FOUND', message: 'Utilisateur introuvable.', status: 404 },
+      });
+    }
+
+    user.deletedAt = new Date();
+    user.actif = false;
+    user.updatedAt = new Date();
+    await this.utilisateurRepository.save(user);
+
+    return { success: true, message: `Le compte de ${user.nom} a été supprimé avec succès.` };
   }
 
   /** Profil public — jamais renvoyer mot_de_passe_hash / secret 2FA. */

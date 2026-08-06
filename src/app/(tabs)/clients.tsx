@@ -11,6 +11,8 @@ import {
 } from 'lucide-react-native';
 import { AppColors as C } from '@/constants/theme';
 import { useClients } from '@/hooks/useClients';
+import { useDossiers } from '@/hooks/useDossiers';
+import { hasDossierAccess, hasClientAccess } from '@/services/dossierInvitations.service';
 import { Client, deleteClient, updateClient } from '@/services/clients.service';
 import { extractErrorMessage } from '@/lib/api';
 import { Alert } from 'react-native';
@@ -30,6 +32,13 @@ export default function ClientsScreen() {
   const { clients, isLoading, error, total, refetch } = useClients({
     search: search.trim() ? search.trim() : undefined,
   });
+
+  const { dossiers } = useDossiers({ pageSize: 100 });
+  const userDossierClientIds = dossiers
+    .filter(d => hasDossierAccess(Number(d.id)))
+    .map(d => Number(d.clientId));
+
+  const userClients = clients.filter(c => hasClientAccess(Number(c.id), userDossierClientIds));
 
   const initials = (c: Client) => {
     const parts = c.nomComplet.trim().split(' ');
@@ -99,7 +108,7 @@ export default function ClientsScreen() {
         <View style={s.header}>
           <View>
             <Text style={s.title}>Clients</Text>
-            <Text style={s.sub}>{total} client{total > 1 ? 's' : ''} au total</Text>
+            <Text style={s.sub}>{userClients.length} client{userClients.length > 1 ? 's' : ''} au total</Text>
           </View>
           <TouchableOpacity style={s.addBtn} onPress={() => router.push('/nouveau-client')} activeOpacity={0.8}>
             <Plus color={C.gray900} size={22} />
@@ -135,11 +144,11 @@ export default function ClientsScreen() {
       )}
 
       <FlatList
-        data={clients}
+        data={userClients}
         keyExtractor={item => String(item.id)}
         contentContainerStyle={s.list}
         showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={isLoading && clients.length > 0} onRefresh={refetch} tintColor={C.amber500} />}
+        refreshControl={<RefreshControl refreshing={isLoading && userClients.length > 0} onRefresh={refetch} tintColor={C.amber500} />}
         ListEmptyComponent={
           isLoading ? (
             <View style={s.empty}><ActivityIndicator color={C.amber500} size="large" /></View>
